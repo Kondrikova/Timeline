@@ -46,18 +46,32 @@ public class BoardAssembler {
 
 	public BoardDocument assemble(long revision) {
 		Projections.PlanProj plan = plans.findById("plan:current").orElseGet(Projections.PlanProj::new);
+		if (plan.allocations == null) {
+			plan.allocations = new ArrayList<>();
+		}
+		if (plan.capacities == null) {
+			plan.capacities = new ArrayList<>();
+		}
+		if (plan.conflicts == null) {
+			plan.conflicts = new ArrayList<>();
+		}
 		List<Projections.DisciplineProj> allDisciplines = disciplines.findAll().stream()
+				.filter(discipline -> discipline != null && discipline.id != null && discipline.code != null)
 				.sorted(Comparator.comparingInt(BoardAssembler::roleRank)
 						.thenComparing(d -> d.code, String.CASE_INSENSITIVE_ORDER))
 				.toList();
 		Map<UUID, String> disciplineCode = allDisciplines.stream()
 				.collect(Collectors.toMap(d -> d.id, d -> d.code, (a, b) -> a));
 		Map<UUID, String> taskKey = tasks.findAll().stream()
-				.collect(Collectors.toMap(t -> t.id, t -> t.key, (a, b) -> a));
+				.filter(task -> task != null && task.id != null)
+				.collect(Collectors.toMap(t -> t.id, t -> t.key == null ? t.id.toString() : t.key, (a, b) -> a));
 
 		Map<String, List<String>> conflictsByCell = new HashMap<>();
 		Map<String, Integer> summary = new LinkedHashMap<>();
 		for (Projections.Conflict conflict : plan.conflicts) {
+			if (conflict == null || conflict.severity == null) {
+				continue;
+			}
 			summary.merge(conflict.severity, 1, Integer::sum);
 			if (conflict.taskId != null && conflict.sprintId != null && conflict.disciplineId != null) {
 				conflictsByCell
@@ -68,12 +82,14 @@ public class BoardAssembler {
 		}
 
 		Map<String, Projections.Capacity> capacityIndex = plan.capacities.stream()
+				.filter(capacity -> capacity != null && capacity.sprintId != null && capacity.disciplineId != null)
 				.collect(Collectors.toMap(
 						capacity -> capacity.sprintId + "|" + capacity.disciplineId,
 						capacity -> capacity,
 						(a, b) -> a));
 
 		List<BoardDocument.SprintColumn> sprintColumns = sprints.findAllByOrderByNumberAsc().stream()
+				.filter(sprint -> sprint != null && sprint.id != null)
 				.map(sprint -> new BoardDocument.SprintColumn(
 						sprint.id,
 						sprint.number,
@@ -85,13 +101,19 @@ public class BoardAssembler {
 				.toList();
 
 		Map<UUID, List<Projections.TaskProj>> tasksByEpic = tasks.findAllByOrderByPriorityAscKeyAsc().stream()
+				.filter(task -> task != null && task.id != null)
 				.collect(Collectors.groupingBy(task -> task.epicId == null
 						? NIL_EPIC
 						: task.epicId, LinkedHashMap::new, Collectors.toList()));
 
-		List<Projections.LinkProj> allLinks = links.findAll();
+		List<Projections.LinkProj> allLinks = links.findAll().stream()
+				.filter(link -> link != null && link.fromTaskId != null && link.toTaskId != null)
+				.toList();
 		List<BoardDocument.EpicRow> epicRows = new ArrayList<>();
 		for (Projections.EpicProj epic : epics.findAllByOrderByOrderIndexAsc()) {
+			if (epic == null || epic.id == null) {
+				continue;
+			}
 			epicRows.add(toEpicRow(epic, tasksByEpic.getOrDefault(epic.id, List.of()),
 					plan, allLinks, taskKey, conflictsByCell));
 			tasksByEpic.remove(epic.id);
@@ -142,14 +164,15 @@ public class BoardAssembler {
 
 	private BoardDocument.CapacityCell toCapacityCell(Projections.Capacity capacity,
 			Map<UUID, String> disciplineCode) {
+		BigDecimal capacitySp = capacity.capacitySp == null ? BigDecimal.ZERO : capacity.capacitySp;
 		BigDecimal allocated = capacity.allocatedSp == null ? BigDecimal.ZERO : capacity.allocatedSp;
-		BigDecimal free = capacity.capacitySp.subtract(allocated);
+		BigDecimal free = capacitySp.subtract(allocated);
 		return new BoardDocument.CapacityCell(
 				capacity.disciplineId,
 				disciplineCode.getOrDefault(capacity.disciplineId, "?"),
 				capacity.vacationPersonDays,
 				capacity.availablePersonDays,
-				capacity.capacitySp,
+				capacitySp,
 				allocated,
 				free,
 				free.signum() < 0);
@@ -172,15 +195,17 @@ public class BoardAssembler {
 	private BoardDocument.TaskRow toTaskRow(Projections.TaskProj task, Projections.PlanProj plan,
 			List<Projections.LinkProj> allLinks, Map<UUID, String> taskKey,
 			Map<String, List<String>> conflictsByCell) {
-		List<BoardDocument.EstimateCell> estimates = task.estimates.stream()
+		List<Projections.Estimate> estimateSource = task.estimates == null ? List.of() : task.estimates;
+		List<BoardDocument.EstimateCell> estimates = estimateSource.stream()
 				.map(estimate -> new BoardDocument.EstimateCell(estimate.disciplineId, estimate.estimateSp))
 				.toList();
-		List<BoardDocument.AllocationCell> cells = plan.allocations.stream()
-				.filter(allocation -> allocation.taskId.equals(task.id))
+		List<Projections.Allocation> allocationSource = plan.allocations == null ? List.of() : plan.allocations;
+		List<BoardDocument.AllocationCell> cells = allocationSource.stream()
+				.filter(allocation -> allocation.taskId != null && allocation.taskId.equals(task.id))
 				.map(allocation -> new BoardDocument.AllocationCell(
 						allocation.sprintId,
 						allocation.disciplineId,
-						allocation.plannedSp,
+						allocation.plannedSp == null ? BigDecimal.ZERO : allocation.plannedSp,
 						conflictsByCell.getOrDefault(
 								task.id + "|" + allocation.sprintId + "|" + allocation.disciplineId,
 								List.of())))
