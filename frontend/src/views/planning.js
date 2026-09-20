@@ -4,6 +4,16 @@ import { openModal } from '../modal.js';
 
 const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
 
+const CONFLICT_LABELS = {
+  CAPACITY_OVERFLOW: 'Перегруз ёмкости',
+  MISSING_ESTIMATE: 'Нет оценки',
+  SEQUENCE_VIOLATION: 'Нарушение последовательности',
+  SIMULTANEITY_VIOLATION: 'Нарушение совместности',
+  BLOCKED_TASK: 'Заблокированная задача',
+  OVER_ALLOCATED_TASK: 'Сверх оценки',
+  UNPLANNED_TASK: 'Не в плане',
+};
+
 export function renderPlanningTab(root, ctx) {
   const {
     getBoard,
@@ -103,12 +113,13 @@ export function renderPlanningTab(root, ctx) {
     });
   }
 
-  function openMoveModal(tasks, sprints, selectedTaskId, preview) {
+  function openMoveModal(tasks, sprints, selectedTaskId, lastResult) {
+    const lookup = buildLookup(tasks, sprints, getBoard());
     const modal = openModal({
       title: 'Перенос задачи',
       bodyHtml: `
         <form id="move-form" class="modal-form">
-          <p class="hint">Preview показывает каскад, Apply применяет перенос.</p>
+          <p class="hint">«Проверить» покажет каскад без изменений. «Перенести» применит сдвиг и обновит доску.</p>
           <div class="field">
             <label for="move-task">Задача</label>
             <select id="move-task" name="taskId" required>
@@ -121,14 +132,14 @@ export function renderPlanningTab(root, ctx) {
             <label for="move-sprint">В спринт</label>
             <select id="move-sprint" name="sprintId" required>
               ${sprints.map((sprint) =>
-                `<option value="${sprint.id}">${escapeHtml(sprint.name || `S${sprint.number}`)}</option>`).join('')}
+                `<option value="${sprint.id}">${escapeHtml(sprintLabel(sprint))}</option>`).join('')}
             </select>
           </div>
-          <pre class="preview" id="move-result">${escapeHtml(preview || 'Результат preview появится здесь')}</pre>
+          <div class="move-result" id="move-result">${renderMoveResult(lastResult, lookup)}</div>
           <div class="actions">
             <button type="button" class="btn-ghost" data-close="1">Закрыть</button>
-            <button type="button" class="btn-ghost" id="move-preview">Preview</button>
-            <button type="submit" class="btn-primary">Apply</button>
+            <button type="button" class="btn-ghost" id="move-preview">Проверить</button>
+            <button type="submit" class="btn-primary">Перенести</button>
           </div>
         </form>
       `,
@@ -153,10 +164,9 @@ export function renderPlanningTab(root, ctx) {
           throw new Error(await readError(res));
         }
         const body = await res.json();
-        setPreview(JSON.stringify(body, null, 2));
-        modal.body.querySelector('#move-result').textContent = JSON.stringify(body, null, 2);
+        setPreview(body);
+        modal.body.querySelector('#move-result').innerHTML = renderMoveResult(body, lookup);
         if (!previewMode) {
-          modal.close();
           await refreshBoard({ force: true });
         }
       }
@@ -174,6 +184,101 @@ export function renderPlanningTab(root, ctx) {
 
   paint();
   return { paint };
+}
+
+function buildLookup(tasks, sprints, board) {
+  const taskById = Object.fromEntries(tasks.map((task) => [task.id, task]));
+  const sprintById = Object.fromEntries(sprints.map((sprint) => [sprint.id, sprint]));
+  const disciplineById = {};
+  for (const sprint of board?.sprints || []) {
+    for (const cell of sprint.capacity || []) {
+      if (cell.disciplineId && cell.disciplineCode) {
+        disciplineById[cell.disciplineId] = cell.disciplineCode;
+      }
+    }
+  }
+  return { taskById, sprintById, disciplineById };
+}
+
+function sprintLabel(sprint) {
+  if (!sprint) {
+    return 'спринт';
+  }
+  return sprint.name || `Sprint ${sprint.number}`;
+}
+
+function renderMoveResult(result, lookup) {
+  if (!result || typeof result !== 'object') {
+    return '<p class="meta">Здесь появится результат проверки или переноса.</p>';
+  }
+
+  const shifts = Object.entries(result.shifts || {});
+  const conflicts = result.conflicts || [];
+  const mode = result.preview
+    ? 'Проверка (изменения не применены)'
+    : 'Перенос выполнен';
+
+  const shiftRows = shifts.length
+    ? shifts
+      .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
+      .map(([taskId, delta]) => {
+        const task = lookup.taskById[taskId];
+        const label = task ? `${task.key} · ${task.title}` : taskId.slice(0, 8);
+        return `<li><strong>${escapeHtml(label)}</strong> — ${formatShift(delta)}</li>`;
+      }).join('')
+    : '<li class="meta">Каскадных сдвигов нет</li>';
+
+  const conflictRows = conflicts.length
+    ? conflicts.map((conflict) => {
+      const type = CONFLICT_LABELS[conflict.type] || conflict.type || 'Конфликт';
+      const bits = [
+        `<strong>${escapeHtml(type)}</strong>`,
+        conflict.severity ? `<span class="status">${escapeHtml(conflict.severity)}</span>` : '',
+      ];
+      const where = [];
+      if (conflict.taskId) {
+        const task = lookup.taskById[conflict.taskId];
+        where.push(task ? `задача ${task.key}` : `задача ${conflict.taskId.slice(0, 8)}`);
+      }
+      if (conflict.sprintId) {
+        where.push(sprintLabel(lookup.sprintById[conflict.sprintId]));
+      }
+      if (conflict.disciplineId) {
+        where.push(lookup.disciplineById[conflict.disciplineId] || conflict.disciplineId.slice(0, 8));
+      }
+      return `<li>
+        <div>${bits.filter(Boolean).join(' · ')}</div>
+        ${where.length ? `<div class="meta">${escapeHtml(where.join(' · '))}</div>` : ''}
+        ${conflict.details ? `<div>${escapeHtml(conflict.details)}</div>` : ''}
+      </li>`;
+    }).join('')
+    : '<li class="meta">Конфликтов нет</li>';
+
+  return `
+    <div class="move-summary">
+      <div class="move-summary-title">${escapeHtml(mode)}</div>
+      <div class="move-block">
+        <div class="move-block-title">Каскад</div>
+        <ul class="move-list">${shiftRows}</ul>
+      </div>
+      <div class="move-block">
+        <div class="move-block-title">Конфликты</div>
+        <ul class="move-list">${conflictRows}</ul>
+      </div>
+    </div>`;
+}
+
+function formatShift(delta) {
+  const value = Number(delta);
+  if (!value) {
+    return 'без сдвига';
+  }
+  const abs = Math.abs(value);
+  const unit = abs === 1 ? 'спринт' : abs < 5 ? 'спринта' : 'спринтов';
+  if (value > 0) {
+    return `сдвиг вперёд на ${abs} ${unit}`;
+  }
+  return `сдвиг назад на ${abs} ${unit}`;
 }
 
 function emptyRow(sprintCount) {
