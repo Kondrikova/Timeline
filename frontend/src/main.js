@@ -1,9 +1,21 @@
 import { api, clearAuth, loadAuth, login, rolesFromToken } from './api.js';
+import { escapeHtml } from './dom.js';
+import { closeModal } from './modal.js';
+import { renderPlanningTab } from './views/planning.js';
+import { renderBacklogTab } from './views/backlog.js';
+import { renderSprintsTab } from './views/sprints.js';
 
 const app = document.getElementById('app');
 
+const TABS = {
+  planning: 'Планирование',
+  backlog: 'Задачи и эпики',
+  sprints: 'Спринты',
+};
+
 let state = {
   auth: normalizeAuth(loadAuth()),
+  tab: 'planning',
   board: null,
   etag: null,
   statusFilter: 'ALL',
@@ -20,6 +32,9 @@ let streamAbort = null;
 let pollTimer = null;
 let streamGeneration = 0;
 
+/** @type {{ paint?: Function, reload?: Function } | null} */
+let activeView = null;
+
 boot();
 
 function normalizeAuth(auth) {
@@ -34,6 +49,10 @@ function normalizeAuth(auth) {
 
 function isAdmin() {
   return Boolean(state.auth?.roles?.includes('ADMIN'));
+}
+
+function token() {
+  return state.auth?.accessToken;
 }
 
 function boot() {
@@ -58,22 +77,30 @@ function stopUpdates() {
 
 function resetSessionState() {
   stopUpdates();
+  closeModal();
+  activeView = null;
   state.board = null;
   state.etag = null;
   state.selectedTaskId = null;
   state.preview = null;
   state.error = null;
   state.refreshing = false;
+  state.tab = 'planning';
 }
 
 async function enterApp() {
+  if (!isAdmin() && state.tab !== 'planning') {
+    state.tab = 'planning';
+  }
   renderApp();
   await refreshBoard().catch(showError);
+  mountTab();
   connectStream();
 }
 
 function renderGate() {
   stopUpdates();
+  closeModal();
   app.innerHTML = `
     <section class="gate">
       <div class="gate-card">
@@ -114,30 +141,33 @@ function renderGate() {
 }
 
 function renderApp() {
+  const admin = isAdmin();
+  const tabs = admin
+    ? Object.entries(TABS)
+    : [['planning', TABS.planning]];
+
   app.innerHTML = `
     <div class="shell">
       <header class="topbar">
         <div>
           <h1 class="brand">Time<span>line</span></h1>
-          <p class="meta">Доска плана · ${escapeHtml(state.auth.username)}${isAdmin() ? ' · ADMIN' : ''}</p>
+          <p class="meta">${escapeHtml(state.auth.username)}${admin ? ' · ADMIN' : ''}</p>
         </div>
         <div class="actions">
           <span class="chip" id="live-chip">offline</span>
           <button class="btn-ghost" type="button" id="logout">Выйти</button>
         </div>
       </header>
-      <div class="toolbar">
-        <label for="status-filter">Статус</label>
-        <select id="status-filter">
-          ${['ALL', 'TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'].map((status) =>
-            `<option value="${status}" ${state.statusFilter === status ? 'selected' : ''}>${status}</option>`).join('')}
-        </select>
-        <button class="btn-ghost" type="button" id="reload">Обновить</button>
-        <span class="chip warn" id="conflicts-chip"></span>
-      </div>
-      ${isAdmin() ? `<section class="create-panel" id="create-panel"></section>` : ''}
-      <div class="board-wrap" id="board-root"></div>
-      <section class="move-panel" id="move-panel"></section>
+
+      <nav class="tabs" role="tablist">
+        ${tabs.map(([id, label]) => `
+          <button type="button" class="tab ${state.tab === id ? 'active' : ''}"
+            role="tab" aria-selected="${state.tab === id}" data-tab="${id}">
+            ${escapeHtml(label)}
+          </button>`).join('')}
+      </nav>
+
+      <div id="tab-root" class="tab-root"></div>
       <p class="error" id="app-error" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error || '')}</p>
     </div>
   `;
@@ -148,136 +178,73 @@ function renderApp() {
     resetSessionState();
     renderGate();
   };
-  document.getElementById('reload').onclick = () => refreshBoard({ force: true }).catch(showError);
-  document.getElementById('status-filter').onchange = (event) => {
-    state.statusFilter = event.target.value;
-    paintBoard();
-  };
-  paintCreatePanel();
-  paintBoard();
-  paintMovePanel();
+  document.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.tab;
+      if (next === state.tab) {
+        return;
+      }
+      state.tab = next;
+      renderApp();
+      mountTab();
+      paintLiveChip();
+    });
+  });
   paintLiveChip();
 }
 
-function paintCreatePanel() {
-  const panel = document.getElementById('create-panel');
-  if (!panel || !isAdmin()) {
+function mountTab() {
+  const root = document.getElementById('tab-root');
+  if (!root) {
     return;
   }
-  const epics = (state.board?.epics || []).filter((epic) => epic.id);
-  panel.innerHTML = `
-    <h2>Новая задача</h2>
-    <p class="hint">Доступно роли ADMIN. После создания доска обновится по событию проекции.</p>
-    <form id="create-task-form" class="create-grid">
-      <div class="field">
-        <label for="task-key">Ключ</label>
-        <input id="task-key" name="key" required placeholder="T-10" maxlength="32" />
-      </div>
-      <div class="field">
-        <label for="task-title">Название</label>
-        <input id="task-title" name="title" required placeholder="Описание работы" maxlength="512" />
-      </div>
-      <div class="field">
-        <label for="task-epic">Эпик</label>
-        <select id="task-epic" name="epicId">
-          <option value="">Без эпика</option>
-          ${epics.map((epic) =>
-            `<option value="${epic.id}">${escapeHtml(epic.key)} · ${escapeHtml(epic.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field">
-        <label for="task-priority">Приоритет</label>
-        <input id="task-priority" name="priority" type="number" value="0" />
-      </div>
-      <div class="field field-wide">
-        <label for="task-description">Описание</label>
-        <input id="task-description" name="description" placeholder="Необязательно" />
-      </div>
-      <div class="actions field-wide">
-        <button class="btn-primary" type="submit">Добавить задачу</button>
-        <button class="btn-ghost" type="button" id="create-epic-toggle">Создать эпик…</button>
-      </div>
-    </form>
-    <form id="create-epic-form" class="create-grid" hidden>
-      <div class="field">
-        <label for="epic-key">Ключ эпика</label>
-        <input id="epic-key" name="key" required placeholder="AUTH" maxlength="32" />
-      </div>
-      <div class="field">
-        <label for="epic-name">Название</label>
-        <input id="epic-name" name="name" required placeholder="Авторизация" />
-      </div>
-      <div class="actions field-wide">
-        <button class="btn-primary" type="submit">Создать эпик</button>
-      </div>
-    </form>
-  `;
+  closeModal();
+  activeView = null;
 
-  document.getElementById('create-epic-toggle').onclick = () => {
-    const form = document.getElementById('create-epic-form');
-    form.hidden = !form.hidden;
-  };
+  if (state.tab === 'planning') {
+    activeView = renderPlanningTab(root, {
+      getBoard: () => state.board,
+      getSelectedTaskId: () => state.selectedTaskId,
+      setSelectedTaskId: (id) => { state.selectedTaskId = id; },
+      getStatusFilter: () => state.statusFilter,
+      setStatusFilter: (value) => { state.statusFilter = value; },
+      getPreview: () => state.preview,
+      setPreview: (value) => { state.preview = value; },
+      isAdmin: isAdmin(),
+      token: token(),
+      refreshBoard,
+      showError,
+    });
+    return;
+  }
 
-  document.getElementById('create-task-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.target;
-    const payload = {
-      key: form.key.value.trim(),
-      title: form.title.value.trim(),
-      epicId: form.epicId.value || null,
-      priority: Number(form.priority.value || 0),
-      description: form.description.value.trim() || null,
-    };
-    try {
-      const res = await api('/api/v1/tasks', {
-        method: 'POST',
-        token: state.auth.accessToken,
-        body: payload,
-      });
-      if (!res.ok) {
-        throw new Error(await readError(res));
-      }
-      form.reset();
-      form.priority.value = '0';
-      state.error = null;
-      hideError();
-      // Проекция придёт по SSE; форсируем чтение на случай задержки.
-      setTimeout(() => refreshBoard({ force: true }).catch(showError), 400);
-    }
-    catch (err) {
-      showError(err);
-    }
-  });
+  if (state.tab === 'backlog' && isAdmin()) {
+    activeView = renderBacklogTab(root, {
+      token: token(),
+      isAdmin: true,
+      onChanged: () => refreshBoard({ force: true }).catch(() => {}),
+      showError,
+    });
+    return;
+  }
 
-  document.getElementById('create-epic-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.target;
-    try {
-      const res = await api('/api/v1/epics', {
-        method: 'POST',
-        token: state.auth.accessToken,
-        body: {
-          key: form.key.value.trim(),
-          name: form.name.value.trim(),
-          color: '#0f7a6c',
-          orderIndex: (state.board?.epics || []).length + 1,
-        },
-      });
-      if (!res.ok) {
-        throw new Error(await readError(res));
-      }
-      form.reset();
-      form.hidden = true;
-      setTimeout(() => refreshBoard({ force: true }).catch(showError), 400);
-    }
-    catch (err) {
-      showError(err);
-    }
-  });
+  if (state.tab === 'sprints' && isAdmin()) {
+    activeView = renderSprintsTab(root, {
+      token: token(),
+      isAdmin: true,
+      onChanged: () => refreshBoard({ force: true }).catch(() => {}),
+      showError,
+    });
+    return;
+  }
+
+  state.tab = 'planning';
+  renderApp();
+  mountTab();
 }
 
 async function refreshBoard({ force = false } = {}) {
-  if (!state.auth?.accessToken) {
+  if (!token()) {
     return;
   }
   if (state.refreshing) {
@@ -286,7 +253,7 @@ async function refreshBoard({ force = false } = {}) {
   state.refreshing = true;
   try {
     const res = await api('/api/v1/timeline/board', {
-      token: state.auth.accessToken,
+      token: token(),
       etag: force ? undefined : state.etag,
     });
     if (res.status === 304) {
@@ -306,175 +273,14 @@ async function refreshBoard({ force = false } = {}) {
     state.board = await res.json();
     state.error = null;
     hideError();
-    paintCreatePanel();
-    paintBoard();
-    paintMovePanel();
-    document.getElementById('board-root')?.classList.add('flash');
-    setTimeout(() => document.getElementById('board-root')?.classList.remove('flash'), 800);
+    if (state.tab === 'planning') {
+      activeView?.paint?.();
+      document.getElementById('board-root')?.classList.add('flash');
+      setTimeout(() => document.getElementById('board-root')?.classList.remove('flash'), 800);
+    }
   }
   finally {
     state.refreshing = false;
-  }
-}
-
-function paintBoard() {
-  const root = document.getElementById('board-root');
-  const conflictsChip = document.getElementById('conflicts-chip');
-  if (!root || !state.board) {
-    if (root) {
-      root.innerHTML = '<p class="meta" style="padding:1rem">Загрузка доски…</p>';
-    }
-    return;
-  }
-
-  const board = state.board;
-  const summary = board.conflictsSummary || {};
-  const conflictCount = Object.values(summary).reduce((a, b) => a + b, 0);
-  if (conflictsChip) {
-    conflictsChip.textContent = conflictCount
-      ? `конфликты: ${conflictCount}`
-      : 'конфликтов нет';
-  }
-
-  const sprints = board.sprints || [];
-  const epics = board.epics || [];
-
-  const head = `
-    <tr>
-      <th>Задача</th>
-      ${sprints.map((sprint) => `
-        <th>
-          ${escapeHtml(sprint.name || `S${sprint.number}`)}
-          <small>${escapeHtml(sprint.startDate || '')} — ${escapeHtml(sprint.endDate || '')}</small>
-          <div class="capacity">${capacityHtml(sprint.capacity || [])}</div>
-        </th>`).join('')}
-    </tr>`;
-
-  const body = epics.map((epic) => {
-    const tasks = (epic.tasks || []).filter((task) =>
-      state.statusFilter === 'ALL' || task.status === state.statusFilter);
-    const epicRow = `
-      <tr class="epic-row">
-        <td colspan="${Math.max(sprints.length, 0) + 1}">${escapeHtml(epic.key || '—')} · ${escapeHtml(epic.name || 'Без эпика')}</td>
-      </tr>`;
-    const taskRows = tasks.map((task) => {
-      const selected = state.selectedTaskId === task.id ? 'selected' : '';
-      return `
-        <tr class="task-row ${selected}" data-task-id="${task.id}">
-          <td>
-            <span class="task-key">${escapeHtml(task.key)}</span>
-            <span class="task-title">${escapeHtml(task.title)}</span>
-            <span class="status">${escapeHtml(task.status)}</span>
-          </td>
-          ${sprints.map((sprint) => cellHtml(task, sprint.id)).join('')}
-        </tr>`;
-    }).join('');
-    return epicRow + taskRows;
-  }).join('');
-
-  root.innerHTML = `<table class="board"><thead>${head}</thead><tbody>${body || emptyBoardRow(sprints.length)}</tbody></table>`;
-  root.querySelectorAll('.task-row').forEach((row) => {
-    row.addEventListener('click', () => {
-      state.selectedTaskId = row.dataset.taskId;
-      paintBoard();
-      paintMovePanel();
-    });
-  });
-}
-
-function emptyBoardRow(sprintCount) {
-  return `<tr><td colspan="${sprintCount + 1}" class="cell-empty">Пока нет задач${isAdmin() ? ' — добавьте первую формой выше' : ''}</td></tr>`;
-}
-
-function capacityHtml(cells) {
-  if (!cells.length) {
-    return 'ёмкость появится после событий планирования';
-  }
-  return cells.map((cell) => {
-    const free = cell.freeSp ?? '—';
-    const over = cell.overloaded ? ' over' : '';
-    return `<div class="${over}">${escapeHtml(cell.disciplineCode || '?')}: cap ${cell.capacitySp} / alloc ${cell.allocatedSp} / free ${free}</div>`;
-  }).join('');
-}
-
-function cellHtml(task, sprintId) {
-  const cells = (task.cells || []).filter((cell) => cell.sprintId === sprintId);
-  if (!cells.length) {
-    return '<td class="cell-empty">—</td>';
-  }
-  return `<td>${cells.map((cell) => {
-    const conflict = (cell.conflicts || []).length ? 'conflict' : '';
-    return `<div class="cell-sp ${conflict}">${escapeHtml(String(cell.plannedSp))}${conflict ? ' !' : ''}</div>`;
-  }).join('')}</td>`;
-}
-
-function paintMovePanel() {
-  const panel = document.getElementById('move-panel');
-  if (!panel || !state.board) {
-    return;
-  }
-  const tasks = (state.board.epics || []).flatMap((epic) => epic.tasks || []);
-  const selected = tasks.find((task) => task.id === state.selectedTaskId);
-  const sprints = state.board.sprints || [];
-
-  panel.innerHTML = `
-    <h2>Перенос задачи</h2>
-    <p class="hint">Выберите строку на доске, затем спринт. Preview показывает каскад, Apply применяет.</p>
-    <div class="field">
-      <label>Задача</label>
-      <select id="move-task">
-        <option value="">—</option>
-        ${tasks.map((task) =>
-          `<option value="${task.id}" ${selected?.id === task.id ? 'selected' : ''}>${escapeHtml(task.key)} · ${escapeHtml(task.title)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field">
-      <label>В спринт</label>
-      <select id="move-sprint">
-        ${sprints.map((sprint) =>
-          `<option value="${sprint.id}">${escapeHtml(sprint.name || `S${sprint.number}`)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="actions">
-      <button class="btn-ghost" type="button" id="move-preview" ${isAdmin() ? '' : 'disabled'}>Preview</button>
-      <button class="btn-primary" type="button" id="move-apply" ${isAdmin() ? '' : 'disabled'}>Apply</button>
-    </div>
-    <pre class="preview" id="move-result">${escapeHtml(state.preview || 'Результат preview появится здесь')}</pre>
-  `;
-
-  document.getElementById('move-task').onchange = (event) => {
-    state.selectedTaskId = event.target.value || null;
-    paintBoard();
-  };
-  document.getElementById('move-preview').onclick = () => runMove(true);
-  document.getElementById('move-apply').onclick = () => runMove(false);
-}
-
-async function runMove(preview) {
-  if (!isAdmin()) {
-    showError('Перенос доступен только ADMIN');
-    return;
-  }
-  const taskId = document.getElementById('move-task')?.value;
-  const toSprintId = document.getElementById('move-sprint')?.value;
-  if (!taskId || !toSprintId) {
-    showError('Выберите задачу и спринт');
-    return;
-  }
-  const res = await api(`/api/v1/plan/tasks/${taskId}/move`, {
-    method: 'POST',
-    token: state.auth.accessToken,
-    body: { toSprintId, preview },
-  });
-  if (!res.ok) {
-    showError(`Перенос не выполнен (${res.status}): ${await readError(res)}`);
-    return;
-  }
-  const body = await res.json();
-  state.preview = JSON.stringify(body, null, 2);
-  paintMovePanel();
-  if (!preview) {
-    await refreshBoard({ force: true });
   }
 }
 
@@ -501,7 +307,7 @@ function connectStream() {
 async function subscribeSse(signal, generation) {
   const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/v1/timeline/stream`, {
     headers: {
-      Authorization: `Bearer ${state.auth.accessToken}`,
+      Authorization: `Bearer ${token()}`,
       Accept: 'text/event-stream',
     },
     signal,
@@ -538,7 +344,6 @@ async function subscribeSse(signal, generation) {
   }
 
   if (generation === streamGeneration && state.auth) {
-    // Поток оборвался — один тихий reconnect, без наслоения интервалов.
     setTimeout(() => {
       if (generation === streamGeneration && state.auth) {
         connectStream();
@@ -548,9 +353,8 @@ async function subscribeSse(signal, generation) {
 }
 
 function isBoardUpdatedFrame(frame) {
-  const lines = frame.split('\n');
   let eventName = 'message';
-  for (const line of lines) {
+  for (const line of frame.split('\n')) {
     if (line.startsWith('event:')) {
       eventName = line.slice(6).trim();
     }
@@ -592,22 +396,4 @@ function hideError() {
     el.hidden = true;
     el.textContent = '';
   }
-}
-
-async function readError(res) {
-  try {
-    const body = await res.json();
-    return body.detail || body.title || body.code || JSON.stringify(body);
-  }
-  catch {
-    return await res.text();
-  }
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
 }

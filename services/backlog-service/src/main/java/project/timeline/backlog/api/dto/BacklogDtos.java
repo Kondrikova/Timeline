@@ -25,6 +25,12 @@ public final class BacklogDtos {
 			int orderIndex) {
 	}
 
+	public record EpicUpdateRequest(
+			@NotBlank String name,
+			String color,
+			int orderIndex) {
+	}
+
 	public record EpicResponse(UUID id, String key, String name, String color, int orderIndex) {
 
 		public static EpicResponse of(Epic epic) {
