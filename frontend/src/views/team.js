@@ -445,6 +445,7 @@ export function renderTeamTab(root, ctx) {
           }
           modal.setError('');
           renderList();
+          await reload();
           onChanged?.();
         }
         catch (err) {
