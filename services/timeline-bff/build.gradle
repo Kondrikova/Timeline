@@ -1,0 +1,13 @@
+plugins {
+	alias(libs.plugins.spring.boot)
+}
+
+dependencies {
+	implementation project(':libs:common-web')
+	implementation project(':libs:common-events')
+
+	implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+	implementation 'org.springframework.kafka:spring-kafka'
+
+	testImplementation 'org.springframework.security:spring-security-test'
+}

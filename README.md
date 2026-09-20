@@ -9,6 +9,7 @@
 - [Архитектура решения](docs/architecture.md) — декомпозиция на микросервисы,
   диаграммы C4, модель данных, межсервисное взаимодействие, консистентность,
   безопасность, наблюдаемость, план реализации и реестр архитектурных решений.
+- [Нагрузочное тестирование](docs/load-testing.md) — SLO и шаблон результатов k6.
 
 ## Состав репозитория
 
@@ -18,7 +19,14 @@ libs/common-outbox    transactional outbox, идемпотентный потр�
 libs/common-web       ProblemDetail, корреляция запросов, ресурс-сервер
 services/api-gateway  единая точка входа: JWT, маршруты, rate limit, CORS
 services/team-service сотрудники, дисциплины с velocity, отпуска
-deploy                docker-compose, realm Keycloak, инициализация Postgres
+services/schedule-service спринты, производственный календарь, сага удаления
+services/backlog-service  эпики, задачи, оценки в SP, связи трёх типов
+services/planning-service аллокации, ёмкость, каскад, конфликты
+services/timeline-bff     проекция доски (MongoDB) и SSE
+frontend              SPA доски (nginx)
+k6                    нагрузочные сценарии
+postman               коллекция сценариев защиты
+deploy                docker-compose, observability, Keycloak, Postgres
 ```
 
 ## Запуск
@@ -31,14 +39,20 @@ cd deploy
 docker compose up --build
 ```
 
-Поднимаются Postgres, Kafka (KRaft), Redis, Keycloak с импортом realm, а также
-`team-service` и `api-gateway`.
+С наблюдаемостью (Prometheus, Grafana, Tempo, OTel-агент):
+
+```bash
+cd deploy
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+```
 
 | Компонент | Адрес |
 |---|---|
+| Frontend | http://localhost/ |
 | API Gateway | http://localhost:8080 |
-| team-service | http://localhost:8082 |
 | Keycloak | http://localhost:8090 (admin/admin) |
+| Grafana | http://localhost:3000 (admin/admin) |
+| Prometheus | http://localhost:9090 |
 
 Преднастроенные пользователи realm `timeline`:
 
@@ -49,6 +63,11 @@ docker compose up --build
 | `olga.qa` | `member123` | MEMBER |
 
 ## Проверка сценария
+
+Коллекция Postman: [`postman/Timeline.postman_collection.json`](postman/Timeline.postman_collection.json)
+(папки по сценариям 0–5 + саги, OIDC password grant, тесты на шагах).
+
+Нагрузка k6: [`k6/`](k6/) — см. `k6/README.md`.
 
 Получить токен:
 
@@ -74,7 +93,7 @@ curl -X POST http://localhost:8080/api/v1/team/members \
 
 Сотрудник корректирует свой отпуск:
 
-```bash
+```
 TOKEN=$(curl -s -X POST \
   http://localhost:8090/realms/timeline/protocol/openid-connect/token \
   -d grant_type=password -d client_id=timeline-web \
@@ -89,6 +108,17 @@ curl -X POST http://localhost:8080/api/v1/team/me/vacations \
 `VACATION_OVERLAP`, а попытка изменить чужой отпуск — `403` с кодом
 `NOT_OWN_VACATION`.
 
+Доска плана (один запрос) и поток обновлений:
+
+```bash
+curl -s http://localhost:8080/api/v1/timeline/board \
+  -H "Authorization: Bearer $TOKEN" | jq '.conflictsSummary,.sprints[0].capacity'
+
+# SSE: события board-updated приходят после пересчёта плана
+curl -N http://localhost:8080/api/v1/timeline/stream \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Сборка и тесты
 
 ```bash
@@ -99,16 +129,24 @@ curl -X POST http://localhost:8080/api/v1/team/me/vacations \
 Testcontainers и проверяют миграции вместе с ограничениями уровня СУБД; без
 запущенного Docker они пропускаются, а не падают.
 
+Фронтенд локально:
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
 ## Статус реализации
 
 | Этап | Состояние |
 |---|---|
 | Каркас, окружение, шлюз | готово |
 | `team-service` | готово |
-| `schedule-service` | не начат |
-| `backlog-service` | не начат |
-| `planning-service` | не начат |
-| `timeline-bff` | не начат |
-| Саги удаления, DLQ | не начаты |
-| Наблюдаемость | базовая: метрики и health |
-| Postman, k6, фронтенд | не начаты |
+| `schedule-service` | готово |
+| `backlog-service` | готово |
+| `planning-service` | готово |
+| `timeline-bff` | готово |
+| Саги удаления (спринт и задача), retry/DLT | готово |
+| Наблюдаемость (Prometheus, Grafana, Tempo, OTel) | готово |
+| Postman | готово |
+| k6 | готово (`k6/`, `docs/load-testing.md`) |
+| Фронтенд | готово (`frontend/`) |

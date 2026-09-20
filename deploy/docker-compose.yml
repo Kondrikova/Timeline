@@ -22,6 +22,18 @@ services:
       timeout: 3s
       retries: 20
 
+  mongodb:
+    image: mongo:8
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   redis:
     image: redis:7-alpine
     ports:
@@ -79,30 +91,80 @@ services:
       timeout: 5s
       retries: 30
 
-  team-service:
+  team-service: &app-service
     build:
       context: ..
       dockerfile: deploy/Dockerfile
       args:
         SERVICE: team-service
-    environment:
-      PORT: "8082"
-      DB_URL: jdbc:postgresql://postgres:5432/team
-      DB_USER: team
-      DB_PASSWORD: team
+    environment: &app-env
       KAFKA_BOOTSTRAP: kafka:19092
       # Издатель токена виден снаружи, ключи забираются изнутри сети.
       OIDC_ISSUER: http://localhost:8090/realms/timeline
       OIDC_JWKS: http://keycloak:8090/realms/timeline/protocol/openid-connect/certs
+      PORT: "8082"
+      DB_URL: jdbc:postgresql://postgres:5432/team
+      DB_USER: team
+      DB_PASSWORD: team
     ports:
       - "8082:8082"
-    depends_on:
+    depends_on: &app-deps
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+
+  backlog-service:
+    <<: *app-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: backlog-service
+    environment:
+      <<: *app-env
+      PORT: "8083"
+      DB_URL: jdbc:postgresql://postgres:5432/backlog
+      DB_USER: backlog
+      DB_PASSWORD: backlog
+      PLANNING_SERVICE_URI: http://planning-service:8085
+    ports:
+      - "8083:8083"
+
+  schedule-service:
+    <<: *app-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: schedule-service
+    environment:
+      <<: *app-env
+      PORT: "8084"
+      DB_URL: jdbc:postgresql://postgres:5432/schedule
+      DB_USER: schedule
+      DB_PASSWORD: schedule
+      PLANNING_SERVICE_URI: http://planning-service:8085
+    ports:
+      - "8084:8084"
+
+  planning-service:
+    <<: *app-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: planning-service
+    environment:
+      <<: *app-env
+      PORT: "8085"
+      DB_URL: jdbc:postgresql://postgres:5432/planning
+      DB_USER: planning
+      DB_PASSWORD: planning
+    ports:
+      - "8085:8085"
 
   api-gateway:
     build:
@@ -114,6 +176,10 @@ services:
       PORT: "8080"
       REDIS_HOST: redis
       TEAM_SERVICE_URI: http://team-service:8082
+      BACKLOG_SERVICE_URI: http://backlog-service:8083
+      SCHEDULE_SERVICE_URI: http://schedule-service:8084
+      PLANNING_SERVICE_URI: http://planning-service:8085
+      TIMELINE_BFF_URI: http://timeline-bff:8081
       OIDC_ISSUER: http://localhost:8090/realms/timeline
       OIDC_JWKS: http://keycloak:8090/realms/timeline/protocol/openid-connect/certs
     ports:
@@ -124,5 +190,36 @@ services:
       keycloak:
         condition: service_healthy
 
+  timeline-bff:
+    <<: *app-service
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SERVICE: timeline-bff
+    environment:
+      <<: *app-env
+      PORT: "8081"
+      MONGODB_URI: mongodb://mongodb:27017/timeline
+    ports:
+      - "8081:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+
 volumes:
   postgres-data:
+  mongo-data:

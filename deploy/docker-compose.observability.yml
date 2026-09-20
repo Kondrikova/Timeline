@@ -1,0 +1,89 @@
+name: timeline
+
+# Подключение:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+# Grafana: http://localhost:3000 (admin/admin), Prometheus: :9090, Tempo: :3200
+#
+# depends_on сервисов намеренно не переопределяется — иначе сотрётся ожидание
+# Postgres/Kafka/Keycloak из базового compose.
+
+x-otel: &otel-env
+  JAVA_TOOL_OPTIONS: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_INSTRUMENTATION_KAFKA_ENABLED: "true"
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.119.0
+    command: ["--config=/etc/otel-collector.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otel-collector.yml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+    ports:
+      - "3200:3200"
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+
+  team-service:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: team-service
+
+  backlog-service:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: backlog-service
+
+  schedule-service:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: schedule-service
+
+  planning-service:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: planning-service
+
+  timeline-bff:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: timeline-bff
+
+  api-gateway:
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: api-gateway

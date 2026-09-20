@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: timeline-bff
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/timeline}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: timeline-bff
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8090/realms/timeline}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8090/realms/timeline/protocol/openid-connect/certs}
+
+server:
+  port: ${PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: timeline-bff
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-}]"

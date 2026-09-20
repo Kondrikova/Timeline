@@ -1,0 +1,751 @@
+{
+  "info": {
+    "name": "Timeline — сценарии защиты",
+    "description": "Коллекция по сценариям из docs/architecture.md §17.\n\nПеред прогоном: docker compose up, затем Get admin token / Get member token.\nИдентификаторы дисциплин, спринтов и задач сохраняются в переменные коллекции тестами.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "keycloakUrl", "value": "http://localhost:8090" },
+    { "key": "realm", "value": "timeline" },
+    { "key": "clientId", "value": "timeline-web" },
+    { "key": "adminToken", "value": "" },
+    { "key": "memberToken", "value": "" },
+    { "key": "disciplineId", "value": "" },
+    { "key": "memberId", "value": "" },
+    { "key": "sprint1Id", "value": "" },
+    { "key": "sprint2Id", "value": "" },
+    { "key": "epicId", "value": "" },
+    { "key": "task1Id", "value": "" },
+    { "key": "task2Id", "value": "" },
+    { "key": "linkId", "value": "" },
+    { "key": "vacationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get admin token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('token получен', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('adminToken', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "{{clientId}}" },
+                { "key": "username", "value": "anna.admin" },
+                { "key": "password", "value": "admin123" }
+              ]
+            },
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token"
+          }
+        },
+        {
+          "name": "Get member token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('token получен', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('memberToken', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "{{clientId}}" },
+                { "key": "username", "value": "petr.dev" },
+                { "key": "password", "value": "member123" }
+              ]
+            },
+            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token"
+          }
+        }
+      ]
+    },
+    {
+      "name": "0. Настройка команды",
+      "item": [
+        {
+          "name": "Создать дисциплину BACKEND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('disciplineId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"BACKEND\",\n  \"name\": \"Разработка\",\n  \"velocitySpPerSprint\": 20\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/disciplines"
+          }
+        },
+        {
+          "name": "Добавить сотрудника Петра",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('memberId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"22222222-2222-2222-2222-222222222222\",\n  \"fullName\": \"Пётр\",\n  \"disciplineId\": \"{{disciplineId}}\",\n  \"lead\": false,\n  \"activeFrom\": \"2026-01-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/team/members"
+          }
+        },
+        {
+          "name": "Календарь: праздник",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('ok', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days\": { \"2026-01-01\": false, \"2026-01-02\": false },\n  \"comment\": \"Новогодние\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/calendar/days"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Бэклог",
+      "item": [
+        {
+          "name": "Создать эпик",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('epicId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"AUTH\",\n  \"name\": \"Авторизация\",\n  \"color\": \"#336699\",\n  \"orderIndex\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/epics"
+          }
+        },
+        {
+          "name": "Создать задачу T-1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('task1Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"T-1\",\n  \"title\": \"Логин\",\n  \"epicId\": \"{{epicId}}\",\n  \"priority\": 1,\n  \"description\": \"Форма входа\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Создать задачу T-2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('task2Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"T-2\",\n  \"title\": \"Сессии\",\n  \"epicId\": \"{{epicId}}\",\n  \"priority\": 2,\n  \"description\": \"Хранение сессий\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Оценки T-1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estimates\": {\n    \"{{disciplineId}}\": 8\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{task1Id}}/estimates"
+          }
+        },
+        {
+          "name": "Оценки T-2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estimates\": {\n    \"{{disciplineId}}\": 5\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{task2Id}}/estimates"
+          }
+        },
+        {
+          "name": "Связь T-1 → T-2 SEQUENTIAL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linkId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toTaskId\": \"{{task2Id}}\",\n  \"type\": \"SEQUENTIAL\",\n  \"hardness\": \"HARD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{task1Id}}/links"
+          }
+        },
+        {
+          "name": "Список задач",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('есть задачи', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Спринты",
+      "item": [
+        {
+          "name": "Создать спринт 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sprint1Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 1,\n  \"name\": \"Sprint 1\",\n  \"startDate\": \"2026-01-05\",\n  \"endDate\": \"2026-01-16\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sprints"
+          }
+        },
+        {
+          "name": "Создать спринт 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sprint2Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 2,\n  \"name\": \"Sprint 2\",\n  \"startDate\": \"2026-01-19\",\n  \"endDate\": \"2026-01-30\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sprints"
+          }
+        },
+        {
+          "name": "Пересечение спринтов → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "pm.test('код пересечения', () => pm.expect(pm.response.json().code || pm.response.json().title).to.be.ok);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 99,\n  \"name\": \"Overlap\",\n  \"startDate\": \"2026-01-10\",\n  \"endDate\": \"2026-01-20\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/sprints"
+          }
+        },
+        {
+          "name": "Список спринтов",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('два спринта', () => pm.expect(pm.response.json().length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/sprints"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Планирование",
+      "item": [
+        {
+          "name": "Аллокация T-1 в спринт 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"allocations\": [\n    {\n      \"sprintId\": \"{{sprint1Id}}\",\n      \"disciplineId\": \"{{disciplineId}}\",\n      \"plannedSp\": 8\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plan/tasks/{{task1Id}}/allocations"
+          }
+        },
+        {
+          "name": "Аллокация T-2 в спринт 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"allocations\": [\n    {\n      \"sprintId\": \"{{sprint1Id}}\",\n      \"disciplineId\": \"{{disciplineId}}\",\n      \"plannedSp\": 5\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plan/tasks/{{task2Id}}/allocations"
+          }
+        },
+        {
+          "name": "Перенос T-1 preview",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('preview', () => pm.expect(body.preview).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toSprintId\": \"{{sprint2Id}}\",\n  \"preview\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plan/tasks/{{task1Id}}/move"
+          }
+        },
+        {
+          "name": "Перенос T-1 apply",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('применено', () => pm.expect(pm.response.json().preview).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toSprintId\": \"{{sprint2Id}}\",\n  \"preview\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plan/tasks/{{task1Id}}/move"
+          }
+        },
+        {
+          "name": "Конфликты",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/plan/conflicts"
+          }
+        },
+        {
+          "name": "Ёмкость",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/plan/capacity"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Отпуск сотрудника",
+      "item": [
+        {
+          "name": "Мой профиль (MEMBER)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{memberToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/team/me"
+          }
+        },
+        {
+          "name": "Создать отпуск",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('vacationId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{memberToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-07-14\",\n  \"type\": \"VACATION\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/team/me/vacations"
+          }
+        },
+        {
+          "name": "Пересечение отпуска → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "const body = pm.response.json();",
+                  "pm.test('VACATION_OVERLAP', () => pm.expect(JSON.stringify(body)).to.include('VACATION_OVERLAP'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{memberToken}}" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-07-10\",\n  \"endDate\": \"2026-07-20\",\n  \"type\": \"VACATION\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/team/me/vacations"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Доска плана",
+      "item": [
+        {
+          "name": "GET board",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('есть спринты или задачи', () => {",
+                  "  pm.expect(body.sprints || body.tasks || body).to.be.ok;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/timeline/board"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Саги удаления",
+      "item": [
+        {
+          "name": "Удалить задачу T-2 (сага)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('taskId', () => pm.expect(pm.response.json().taskId).to.eql(pm.collectionVariables.get('task2Id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/tasks/{{task2Id}}"
+          }
+        }
+      ]
+    }
+  ]
+}

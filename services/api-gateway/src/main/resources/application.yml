@@ -34,18 +34,76 @@ spring:
                   args:
                     name: teamCircuitBreaker
                     fallbackUri: forward:/fallback/team-service
+            - id: schedule-service
+              uri: ${SCHEDULE_SERVICE_URI:http://localhost:8084}
+              predicates:
+                - Path=/api/v1/sprints/**,/api/v1/calendar/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: scheduleCircuitBreaker
+                    fallbackUri: forward:/fallback/schedule-service
+            - id: backlog-service
+              uri: ${BACKLOG_SERVICE_URI:http://localhost:8083}
+              predicates:
+                - Path=/api/v1/tasks/**,/api/v1/epics/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: backlogCircuitBreaker
+                    fallbackUri: forward:/fallback/backlog-service
+            - id: timeline-bff
+              uri: ${TIMELINE_BFF_URI:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/timeline/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: bffCircuitBreaker
+                    fallbackUri: forward:/fallback/timeline-bff
+            - id: planning-service
+              uri: ${PLANNING_SERVICE_URI:http://localhost:8085}
+              predicates:
+                - Path=/api/v1/plan/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: planningCircuitBreaker
+                    fallbackUri: forward:/fallback/planning-service
 
 resilience4j:
   circuitbreaker:
-    instances:
-      teamCircuitBreaker:
+    configs:
+      default:
         slidingWindowSize: 20
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
-  timelimiter:
     instances:
       teamCircuitBreaker:
+        baseConfig: default
+      scheduleCircuitBreaker:
+        baseConfig: default
+      backlogCircuitBreaker:
+        baseConfig: default
+      planningCircuitBreaker:
+        baseConfig: default
+      bffCircuitBreaker:
+        baseConfig: default
+  timelimiter:
+    configs:
+      default:
         timeoutDuration: 5s
+    instances:
+      teamCircuitBreaker:
+        baseConfig: default
+      scheduleCircuitBreaker:
+        baseConfig: default
+      backlogCircuitBreaker:
+        baseConfig: default
+      planningCircuitBreaker:
+        baseConfig: default
+      bffCircuitBreaker:
+        baseConfig: default
 
 server:
   port: ${PORT:8080}
