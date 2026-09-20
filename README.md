@@ -54,6 +54,42 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml up --bu
 | Grafana | http://localhost:3000 (admin/admin) |
 | Prometheus | http://localhost:9090 |
 
+### Как открыть Grafana
+
+1. Поднимите стек **с observability-оверлеем** (без него Grafana не стартует):
+
+```bash
+cd deploy
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+```
+
+2. Дождитесь готовности контейнера:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml ps grafana
+```
+
+3. Откройте в браузере: [http://localhost:3000](http://localhost:3000)
+
+4. Войдите:
+   - логин: `admin`
+   - пароль: `admin`
+   - анонимный просмотр тоже включён (роль Viewer) — можно сразу смотреть дашборды без входа.
+
+5. Дашборд: меню **Dashboards** → папка **Timeline** → **Timeline Overview**  
+   (файл `deploy/observability/grafana/dashboards/timeline-overview.json`).
+
+6. Источники данных уже провижены:
+   - **Prometheus** — метрики сервисов (`:9090`)
+   - **Tempo** — трейсы (`:3200`); в Explore можно искать spans по сервису.
+
+Остановить только наблюдаемость, оставив приложение:
+
+```bash
+cd deploy
+docker compose -f docker-compose.yml -f docker-compose.observability.yml stop grafana prometheus tempo otel-collector
+```
+
 Преднастроенные пользователи realm `timeline`:
 
 | Логин | Пароль | Роль |
