@@ -1,8 +1,9 @@
-import { api, clearAuth, loadAuth, login } from './api.js';
+import { api, clearAuth, loadAuth, login, rolesFromToken } from './api.js';
 
 const app = document.getElementById('app');
+
 let state = {
-  auth: loadAuth(),
+  auth: normalizeAuth(loadAuth()),
   board: null,
   etag: null,
   statusFilter: 'ALL',
@@ -10,24 +11,69 @@ let state = {
   preview: null,
   error: null,
   live: false,
+  refreshing: false,
 };
 
-let eventSource = null;
+/** @type {AbortController | null} */
+let streamAbort = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let pollTimer = null;
+let streamGeneration = 0;
 
 boot();
 
+function normalizeAuth(auth) {
+  if (!auth?.accessToken) {
+    return null;
+  }
+  if (!auth.roles) {
+    auth.roles = rolesFromToken(auth.accessToken);
+  }
+  return auth;
+}
+
+function isAdmin() {
+  return Boolean(state.auth?.roles?.includes('ADMIN'));
+}
+
 function boot() {
   if (state.auth?.accessToken) {
-    renderApp();
-    refreshBoard().catch(showError);
-    connectStream();
+    enterApp();
   }
   else {
     renderGate();
   }
 }
 
+function stopUpdates() {
+  streamGeneration += 1;
+  streamAbort?.abort();
+  streamAbort = null;
+  if (pollTimer != null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  state.live = false;
+}
+
+function resetSessionState() {
+  stopUpdates();
+  state.board = null;
+  state.etag = null;
+  state.selectedTaskId = null;
+  state.preview = null;
+  state.error = null;
+  state.refreshing = false;
+}
+
+async function enterApp() {
+  renderApp();
+  await refreshBoard().catch(showError);
+  connectStream();
+}
+
 function renderGate() {
+  stopUpdates();
   app.innerHTML = `
     <section class="gate">
       <div class="gate-card">
@@ -56,11 +102,9 @@ function renderGate() {
     const password = event.target.password.value;
     const errorEl = document.getElementById('login-error');
     try {
+      resetSessionState();
       state.auth = await login(username, password);
-      state.error = null;
-      renderApp();
-      await refreshBoard();
-      connectStream();
+      await enterApp();
     }
     catch (err) {
       errorEl.hidden = false;
@@ -75,10 +119,10 @@ function renderApp() {
       <header class="topbar">
         <div>
           <h1 class="brand">Time<span>line</span></h1>
-          <p class="meta">Доска плана · ${escapeHtml(state.auth.username)}</p>
+          <p class="meta">Доска плана · ${escapeHtml(state.auth.username)}${isAdmin() ? ' · ADMIN' : ''}</p>
         </div>
         <div class="actions">
-          <span class="chip ${state.live ? 'live' : ''}" id="live-chip">${state.live ? 'SSE' : 'offline'}</span>
+          <span class="chip" id="live-chip">offline</span>
           <button class="btn-ghost" type="button" id="logout">Выйти</button>
         </div>
       </header>
@@ -91,6 +135,7 @@ function renderApp() {
         <button class="btn-ghost" type="button" id="reload">Обновить</button>
         <span class="chip warn" id="conflicts-chip"></span>
       </div>
+      ${isAdmin() ? `<section class="create-panel" id="create-panel"></section>` : ''}
       <div class="board-wrap" id="board-root"></div>
       <section class="move-panel" id="move-panel"></section>
       <p class="error" id="app-error" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error || '')}</p>
@@ -99,42 +144,177 @@ function renderApp() {
 
   document.getElementById('logout').onclick = () => {
     clearAuth();
-    eventSource?.close();
-    state = { ...state, auth: null, board: null, live: false };
+    state.auth = null;
+    resetSessionState();
     renderGate();
   };
-  document.getElementById('reload').onclick = () => refreshBoard().catch(showError);
+  document.getElementById('reload').onclick = () => refreshBoard({ force: true }).catch(showError);
   document.getElementById('status-filter').onchange = (event) => {
     state.statusFilter = event.target.value;
     paintBoard();
   };
+  paintCreatePanel();
   paintBoard();
   paintMovePanel();
+  paintLiveChip();
 }
 
-async function refreshBoard() {
-  const res = await api('/api/v1/timeline/board', {
-    token: state.auth.accessToken,
-    etag: state.etag,
-  });
-  if (res.status === 304) {
+function paintCreatePanel() {
+  const panel = document.getElementById('create-panel');
+  if (!panel || !isAdmin()) {
     return;
   }
-  if (res.status === 401) {
-    clearAuth();
-    renderGate();
-    throw new Error('Сессия истекла');
+  const epics = (state.board?.epics || []).filter((epic) => epic.id);
+  panel.innerHTML = `
+    <h2>Новая задача</h2>
+    <p class="hint">Доступно роли ADMIN. После создания доска обновится по событию проекции.</p>
+    <form id="create-task-form" class="create-grid">
+      <div class="field">
+        <label for="task-key">Ключ</label>
+        <input id="task-key" name="key" required placeholder="T-10" maxlength="32" />
+      </div>
+      <div class="field">
+        <label for="task-title">Название</label>
+        <input id="task-title" name="title" required placeholder="Описание работы" maxlength="512" />
+      </div>
+      <div class="field">
+        <label for="task-epic">Эпик</label>
+        <select id="task-epic" name="epicId">
+          <option value="">Без эпика</option>
+          ${epics.map((epic) =>
+            `<option value="${epic.id}">${escapeHtml(epic.key)} · ${escapeHtml(epic.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label for="task-priority">Приоритет</label>
+        <input id="task-priority" name="priority" type="number" value="0" />
+      </div>
+      <div class="field field-wide">
+        <label for="task-description">Описание</label>
+        <input id="task-description" name="description" placeholder="Необязательно" />
+      </div>
+      <div class="actions field-wide">
+        <button class="btn-primary" type="submit">Добавить задачу</button>
+        <button class="btn-ghost" type="button" id="create-epic-toggle">Создать эпик…</button>
+      </div>
+    </form>
+    <form id="create-epic-form" class="create-grid" hidden>
+      <div class="field">
+        <label for="epic-key">Ключ эпика</label>
+        <input id="epic-key" name="key" required placeholder="AUTH" maxlength="32" />
+      </div>
+      <div class="field">
+        <label for="epic-name">Название</label>
+        <input id="epic-name" name="name" required placeholder="Авторизация" />
+      </div>
+      <div class="actions field-wide">
+        <button class="btn-primary" type="submit">Создать эпик</button>
+      </div>
+    </form>
+  `;
+
+  document.getElementById('create-epic-toggle').onclick = () => {
+    const form = document.getElementById('create-epic-form');
+    form.hidden = !form.hidden;
+  };
+
+  document.getElementById('create-task-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const payload = {
+      key: form.key.value.trim(),
+      title: form.title.value.trim(),
+      epicId: form.epicId.value || null,
+      priority: Number(form.priority.value || 0),
+      description: form.description.value.trim() || null,
+    };
+    try {
+      const res = await api('/api/v1/tasks', {
+        method: 'POST',
+        token: state.auth.accessToken,
+        body: payload,
+      });
+      if (!res.ok) {
+        throw new Error(await readError(res));
+      }
+      form.reset();
+      form.priority.value = '0';
+      state.error = null;
+      hideError();
+      // Проекция придёт по SSE; форсируем чтение на случай задержки.
+      setTimeout(() => refreshBoard({ force: true }).catch(showError), 400);
+    }
+    catch (err) {
+      showError(err);
+    }
+  });
+
+  document.getElementById('create-epic-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    try {
+      const res = await api('/api/v1/epics', {
+        method: 'POST',
+        token: state.auth.accessToken,
+        body: {
+          key: form.key.value.trim(),
+          name: form.name.value.trim(),
+          color: '#0f7a6c',
+          orderIndex: (state.board?.epics || []).length + 1,
+        },
+      });
+      if (!res.ok) {
+        throw new Error(await readError(res));
+      }
+      form.reset();
+      form.hidden = true;
+      setTimeout(() => refreshBoard({ force: true }).catch(showError), 400);
+    }
+    catch (err) {
+      showError(err);
+    }
+  });
+}
+
+async function refreshBoard({ force = false } = {}) {
+  if (!state.auth?.accessToken) {
+    return;
   }
-  if (!res.ok) {
-    throw new Error(`Доска недоступна (${res.status})`);
+  if (state.refreshing) {
+    return;
   }
-  state.etag = res.headers.get('ETag');
-  state.board = await res.json();
-  state.error = null;
-  paintBoard();
-  paintMovePanel();
-  document.getElementById('board-root')?.classList.add('flash');
-  setTimeout(() => document.getElementById('board-root')?.classList.remove('flash'), 800);
+  state.refreshing = true;
+  try {
+    const res = await api('/api/v1/timeline/board', {
+      token: state.auth.accessToken,
+      etag: force ? undefined : state.etag,
+    });
+    if (res.status === 304) {
+      return;
+    }
+    if (res.status === 401) {
+      clearAuth();
+      state.auth = null;
+      resetSessionState();
+      renderGate();
+      throw new Error('Сессия истекла');
+    }
+    if (!res.ok) {
+      throw new Error(`Доска недоступна (${res.status})`);
+    }
+    state.etag = res.headers.get('ETag');
+    state.board = await res.json();
+    state.error = null;
+    hideError();
+    paintCreatePanel();
+    paintBoard();
+    paintMovePanel();
+    document.getElementById('board-root')?.classList.add('flash');
+    setTimeout(() => document.getElementById('board-root')?.classList.remove('flash'), 800);
+  }
+  finally {
+    state.refreshing = false;
+  }
 }
 
 function paintBoard() {
@@ -175,7 +355,7 @@ function paintBoard() {
       state.statusFilter === 'ALL' || task.status === state.statusFilter);
     const epicRow = `
       <tr class="epic-row">
-        <td colspan="${sprints.length + 1}">${escapeHtml(epic.key || '—')} · ${escapeHtml(epic.name || 'Без эпика')}</td>
+        <td colspan="${Math.max(sprints.length, 0) + 1}">${escapeHtml(epic.key || '—')} · ${escapeHtml(epic.name || 'Без эпика')}</td>
       </tr>`;
     const taskRows = tasks.map((task) => {
       const selected = state.selectedTaskId === task.id ? 'selected' : '';
@@ -192,7 +372,7 @@ function paintBoard() {
     return epicRow + taskRows;
   }).join('');
 
-  root.innerHTML = `<table class="board"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  root.innerHTML = `<table class="board"><thead>${head}</thead><tbody>${body || emptyBoardRow(sprints.length)}</tbody></table>`;
   root.querySelectorAll('.task-row').forEach((row) => {
     row.addEventListener('click', () => {
       state.selectedTaskId = row.dataset.taskId;
@@ -200,6 +380,10 @@ function paintBoard() {
       paintMovePanel();
     });
   });
+}
+
+function emptyBoardRow(sprintCount) {
+  return `<tr><td colspan="${sprintCount + 1}" class="cell-empty">Пока нет задач${isAdmin() ? ' — добавьте первую формой выше' : ''}</td></tr>`;
 }
 
 function capacityHtml(cells) {
@@ -252,8 +436,8 @@ function paintMovePanel() {
       </select>
     </div>
     <div class="actions">
-      <button class="btn-ghost" type="button" id="move-preview">Preview</button>
-      <button class="btn-primary" type="button" id="move-apply">Apply</button>
+      <button class="btn-ghost" type="button" id="move-preview" ${isAdmin() ? '' : 'disabled'}>Preview</button>
+      <button class="btn-primary" type="button" id="move-apply" ${isAdmin() ? '' : 'disabled'}>Apply</button>
     </div>
     <pre class="preview" id="move-result">${escapeHtml(state.preview || 'Результат preview появится здесь')}</pre>
   `;
@@ -267,6 +451,10 @@ function paintMovePanel() {
 }
 
 async function runMove(preview) {
+  if (!isAdmin()) {
+    showError('Перенос доступен только ADMIN');
+    return;
+  }
   const taskId = document.getElementById('move-task')?.value;
   const toSprintId = document.getElementById('move-sprint')?.value;
   if (!taskId || !toSprintId) {
@@ -279,62 +467,113 @@ async function runMove(preview) {
     body: { toSprintId, preview },
   });
   if (!res.ok) {
-    const text = await res.text();
-    showError(`Перенос не выполнен (${res.status}): ${text}`);
+    showError(`Перенос не выполнен (${res.status}): ${await readError(res)}`);
     return;
   }
   const body = await res.json();
   state.preview = JSON.stringify(body, null, 2);
   paintMovePanel();
   if (!preview) {
-    await refreshBoard();
+    await refreshBoard({ force: true });
   }
 }
 
 function connectStream() {
-  eventSource?.close();
-  // EventSource cannot set Authorization; use fetch-stream fallback via cookie is N/A.
-  // For demo we poll lightly when SSE auth is unavailable, and still try query-less SSE
-  // through same-origin proxy after storing token is impossible on EventSource.
-  // Workaround: short poll every 15s + manual reload; attempt SSE without auth fails.
-  // Use fetch + ReadableStream for authenticated SSE.
-  subscribeSse().catch(() => {
-    state.live = false;
-    const chip = document.getElementById('live-chip');
-    if (chip) {
-      chip.textContent = 'poll';
-      chip.classList.remove('live');
+  stopUpdates();
+  const generation = streamGeneration;
+  const controller = new AbortController();
+  streamAbort = controller;
+
+  subscribeSse(controller.signal, generation).catch(() => {
+    if (generation !== streamGeneration) {
+      return;
     }
-    setInterval(() => refreshBoard().catch(() => {}), 15000);
+    state.live = false;
+    paintLiveChip();
+    if (pollTimer == null) {
+      pollTimer = setInterval(() => {
+        refreshBoard().catch(() => {});
+      }, 15000);
+    }
   });
 }
 
-async function subscribeSse() {
+async function subscribeSse(signal, generation) {
   const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/v1/timeline/stream`, {
-    headers: { Authorization: `Bearer ${state.auth.accessToken}`, Accept: 'text/event-stream' },
+    headers: {
+      Authorization: `Bearer ${state.auth.accessToken}`,
+      Accept: 'text/event-stream',
+    },
+    signal,
   });
   if (!res.ok || !res.body) {
     throw new Error('SSE unavailable');
   }
-  state.live = true;
-  const chip = document.getElementById('live-chip');
-  if (chip) {
-    chip.textContent = 'SSE';
-    chip.classList.add('live');
+  if (generation !== streamGeneration) {
+    return;
   }
+  state.live = true;
+  paintLiveChip();
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) {
       break;
     }
-    buffer += decoder.decode(value, { stream: true });
-    if (buffer.includes('board-updated') || buffer.includes('data:')) {
-      buffer = '';
-      await refreshBoard().catch(() => {});
+    if (generation !== streamGeneration) {
+      return;
     }
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() || '';
+    for (const frame of frames) {
+      if (isBoardUpdatedFrame(frame)) {
+        await refreshBoard().catch(() => {});
+      }
+    }
+  }
+
+  if (generation === streamGeneration && state.auth) {
+    // Поток оборвался — один тихий reconnect, без наслоения интервалов.
+    setTimeout(() => {
+      if (generation === streamGeneration && state.auth) {
+        connectStream();
+      }
+    }, 2000);
+  }
+}
+
+function isBoardUpdatedFrame(frame) {
+  const lines = frame.split('\n');
+  let eventName = 'message';
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim();
+    }
+  }
+  return eventName === 'board-updated';
+}
+
+function paintLiveChip() {
+  const chip = document.getElementById('live-chip');
+  if (!chip) {
+    return;
+  }
+  if (state.live) {
+    chip.textContent = 'SSE';
+    chip.classList.add('live');
+  }
+  else if (pollTimer != null) {
+    chip.textContent = 'poll';
+    chip.classList.remove('live');
+  }
+  else {
+    chip.textContent = 'offline';
+    chip.classList.remove('live');
   }
 }
 
@@ -344,6 +583,24 @@ function showError(err) {
   if (el) {
     el.hidden = false;
     el.textContent = state.error;
+  }
+}
+
+function hideError() {
+  const el = document.getElementById('app-error');
+  if (el) {
+    el.hidden = true;
+    el.textContent = '';
+  }
+}
+
+async function readError(res) {
+  try {
+    const body = await res.json();
+    return body.detail || body.title || body.code || JSON.stringify(body);
+  }
+  catch {
+    return await res.text();
   }
 }
 
