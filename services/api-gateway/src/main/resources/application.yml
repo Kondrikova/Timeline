@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8090/realms/timeline}
+          # Издатель токена виден клиенту снаружи, а ключи сервис забирает по
+          # внутреннему адресу: иначе проверка подписи не работала бы в docker-сети.
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8090/realms/timeline/protocol/openid-connect/certs}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          default-filters:
+            # TokenRelay не нужен: токен уже в заголовке Authorization и передаётся как есть.
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+          routes:
+            - id: team-service
+              uri: ${TEAM_SERVICE_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/team/**,/api/v1/disciplines/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: teamCircuitBreaker
+                    fallbackUri: forward:/fallback/team-service
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      teamCircuitBreaker:
+        slidingWindowSize: 20
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+  timelimiter:
+    instances:
+      teamCircuitBreaker:
+        timeoutDuration: 5s
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: api-gateway
