@@ -1,8 +1,11 @@
 name: timeline
 
 # Подключение:
-#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --force-recreate
-# Grafana: http://localhost:3000 (admin/admin), Prometheus: :9090, Tempo: :3200
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+# Grafana: http://localhost:3000  (логин admin / пароль admin)
+#   Dashboards → папка Timeline → Timeline Overview
+# Prometheus: http://localhost:9090
+# Tempo: http://localhost:3200
 #
 # depends_on сервисов намеренно дополняется, а не заменяется целиком —
 # иначе сотрётся ожидание Postgres/Kafka/Keycloak из базового compose.
