@@ -38,6 +38,9 @@ server:
 timeline:
   outbox:
     poll-interval: 500
+  planning:
+    uri: ${PLANNING_SERVICE_URI:http://localhost:8085}
+    timeout: 5s
 
 management:
   endpoints:

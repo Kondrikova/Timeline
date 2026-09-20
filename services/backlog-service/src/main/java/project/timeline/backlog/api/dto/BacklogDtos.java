@@ -101,6 +101,9 @@ public final class BacklogDtos {
 		}
 	}
 
+	public record TaskDeletedResponse(UUID taskId, int releasedAllocations) {
+	}
+
 	private BacklogDtos() {
 	}
 }

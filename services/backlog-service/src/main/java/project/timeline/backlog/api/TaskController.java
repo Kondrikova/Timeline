@@ -1,6 +1,7 @@
 package project.timeline.backlog.api;
 
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -19,12 +21,14 @@ import project.timeline.backlog.api.dto.BacklogDtos.EstimatesRequest;
 import project.timeline.backlog.api.dto.BacklogDtos.LinkRequest;
 import project.timeline.backlog.api.dto.BacklogDtos.LinkResponse;
 import project.timeline.backlog.api.dto.BacklogDtos.StatusRequest;
+import project.timeline.backlog.api.dto.BacklogDtos.TaskDeletedResponse;
 import project.timeline.backlog.api.dto.BacklogDtos.TaskRequest;
 import project.timeline.backlog.api.dto.BacklogDtos.TaskResponse;
 import project.timeline.backlog.api.dto.BacklogDtos.TaskUpdateRequest;
 import project.timeline.backlog.domain.LinkHardness;
 import project.timeline.backlog.domain.TaskStatus;
 import project.timeline.backlog.service.BacklogService;
+import project.timeline.backlog.service.TaskDeletionSaga;
 
 import java.util.List;
 import java.util.UUID;
@@ -34,9 +38,11 @@ import java.util.UUID;
 public class TaskController {
 
 	private final BacklogService service;
+	private final TaskDeletionSaga deletionSaga;
 
-	public TaskController(BacklogService service) {
+	public TaskController(BacklogService service, TaskDeletionSaga deletionSaga) {
 		this.service = service;
+		this.deletionSaga = deletionSaga;
 	}
 
 	@GetMapping
@@ -76,6 +82,17 @@ public class TaskController {
 	@PreAuthorize("hasRole('ADMIN')")
 	public TaskResponse estimates(@PathVariable UUID id, @Valid @RequestBody EstimatesRequest request) {
 		return TaskResponse.of(service.replaceEstimates(id, request.estimates()));
+	}
+
+	/**
+	 * Удаление задачи — сага: сначала снимаются аллокации в planning, затем
+	 * задача и связи. Ответ сообщает, сколько аллокаций было снято.
+	 */
+	@DeleteMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	public TaskDeletedResponse delete(@PathVariable UUID id,
+			@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization) {
+		return new TaskDeletedResponse(id, deletionSaga.deleteTask(id, authorization));
 	}
 
 	@GetMapping("/{id}/links")

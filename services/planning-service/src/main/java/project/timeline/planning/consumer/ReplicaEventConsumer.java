@@ -4,13 +4,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import project.timeline.common.events.Topics;
 import project.timeline.common.events.backlog.BacklogEvents;
 import project.timeline.common.events.schedule.ScheduleEvents;
 import project.timeline.common.events.team.TeamEvents;
+import project.timeline.common.outbox.DomainRetryableTopic;
+import project.timeline.common.outbox.DltMetrics;
 import project.timeline.common.outbox.IdempotentConsumer;
 import project.timeline.planning.replica.RefCalendarDay;
 import project.timeline.planning.replica.RefDiscipline;
@@ -60,12 +65,13 @@ public class ReplicaEventConsumer {
 	private final RefTaskLinkRepository links;
 	private final AllocationRepository allocations;
 	private final PlanningService planning;
+	private final DltMetrics dltMetrics;
 
 	public ReplicaEventConsumer(IdempotentConsumer idempotent, ObjectMapper objectMapper,
 			RefDisciplineRepository disciplines, RefMemberRepository members, RefVacationRepository vacations,
 			RefSprintRepository sprints, RefCalendarDayRepository calendarDays, RefTaskRepository tasks,
 			RefTaskEstimateRepository estimates, RefTaskLinkRepository links,
-			AllocationRepository allocations, PlanningService planning) {
+			AllocationRepository allocations, PlanningService planning, DltMetrics dltMetrics) {
 		this.idempotent = idempotent;
 		this.objectMapper = objectMapper;
 		this.disciplines = disciplines;
@@ -78,8 +84,10 @@ public class ReplicaEventConsumer {
 		this.links = links;
 		this.allocations = allocations;
 		this.planning = planning;
+		this.dltMetrics = dltMetrics;
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.TEAM_MEMBER, groupId = "planning-service")
 	@Transactional
 	public void onTeamMember(String json) {
@@ -97,6 +105,7 @@ public class ReplicaEventConsumer {
 		});
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.TEAM_VACATION, groupId = "planning-service")
 	@Transactional
 	public void onVacation(String json) {
@@ -116,6 +125,7 @@ public class ReplicaEventConsumer {
 		});
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.SCHEDULE_SPRINT, groupId = "planning-service")
 	@Transactional
 	public void onSprint(String json) {
@@ -136,6 +146,7 @@ public class ReplicaEventConsumer {
 		});
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.SCHEDULE_CALENDAR, groupId = "planning-service")
 	@Transactional
 	public void onCalendar(String json) {
@@ -151,6 +162,7 @@ public class ReplicaEventConsumer {
 		});
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.BACKLOG_TASK, groupId = "planning-service")
 	@Transactional
 	public void onTask(String json) {
@@ -162,6 +174,7 @@ public class ReplicaEventConsumer {
 			if (BacklogEvents.TASK_DELETED.equals(type)) {
 				estimates.deleteAllByTaskId(taskId);
 				allocations.deleteAllByTaskId(taskId);
+				links.deleteAllByFromTaskIdOrToTaskId(taskId, taskId);
 				tasks.deleteById(taskId);
 			}
 			else {
@@ -174,6 +187,7 @@ public class ReplicaEventConsumer {
 		});
 	}
 
+	@DomainRetryableTopic
 	@KafkaListener(topics = Topics.BACKLOG_LINK, groupId = "planning-service")
 	@Transactional
 	public void onLink(String json) {
@@ -191,6 +205,12 @@ public class ReplicaEventConsumer {
 			}
 			planning.recalculateAll();
 		});
+	}
+
+	@DltHandler
+	public void onDlt(String payload,
+			@Header(name = KafkaHeaders.RECEIVED_TOPIC, required = false) String topic) {
+		dltMetrics.record(topic, payload);
 	}
 
 	private void upsertDiscipline(JsonNode payload) {

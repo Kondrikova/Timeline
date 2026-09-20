@@ -8,13 +8,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import project.timeline.planning.api.dto.PlanningDtos.ReleaseRequest;
 import project.timeline.planning.api.dto.PlanningDtos.ReleaseResponse;
+import project.timeline.planning.api.dto.PlanningDtos.ReleaseTaskRequest;
+import project.timeline.planning.api.dto.PlanningDtos.ReleaseTaskResponse;
 import project.timeline.planning.service.PlanningService;
 
 /**
- * Внутренний API для шага саги удаления спринта.
+ * Внутренний API для шагов саг удаления спринта и задачи.
  *
- * <p>Не выставляется через gateway наружу: вызывается только schedule-service.
- * Операция идемпотентна — повторный вызов на уже пустом спринте возвращает ноль.
+ * <p>Не выставляется через gateway наружу: вызывается только schedule-service и
+ * backlog-service. Операции идемпотентны — повторный вызов на уже пустых данных
+ * возвращает ноль.
  */
 @RestController
 @RequestMapping("/internal/v1")
@@ -30,5 +33,11 @@ public class InternalAllocationController {
 	@PreAuthorize("hasRole('ADMIN')")
 	public ReleaseResponse release(@Valid @RequestBody ReleaseRequest request) {
 		return new ReleaseResponse(service.releaseSprintAllocations(request.sprintId()));
+	}
+
+	@PostMapping("/allocations/release-task")
+	@PreAuthorize("hasRole('ADMIN')")
+	public ReleaseTaskResponse releaseTask(@Valid @RequestBody ReleaseTaskRequest request) {
+		return new ReleaseTaskResponse(service.releaseTaskAllocations(request.taskId()));
 	}
 }

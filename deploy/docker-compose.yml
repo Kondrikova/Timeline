@@ -129,6 +129,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/backlog
       DB_USER: backlog
       DB_PASSWORD: backlog
+      PLANNING_SERVICE_URI: http://planning-service:8085
     ports:
       - "8083:8083"
 

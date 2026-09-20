@@ -2,9 +2,20 @@ package project.timeline.bff.consumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.DltStrategy;
+import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.kafka.support.converter.ConversionException;
+import org.springframework.messaging.converter.MessageConversionException;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import project.timeline.bff.board.BoardService;
 import project.timeline.bff.projection.DisciplineProjRepository;
@@ -40,11 +51,12 @@ public class BoardProjectionConsumer {
 	private final DisciplineProjRepository disciplines;
 	private final PlanProjRepository plans;
 	private final BoardService boards;
+	private final Counter dltCounter;
 
 	public BoardProjectionConsumer(ObjectMapper objectMapper, ProcessedEventRepository processed,
 			SprintProjRepository sprints, EpicProjRepository epics, TaskProjRepository tasks,
 			LinkProjRepository links, DisciplineProjRepository disciplines, PlanProjRepository plans,
-			BoardService boards) {
+			BoardService boards, MeterRegistry meterRegistry) {
 		this.objectMapper = objectMapper;
 		this.processed = processed;
 		this.sprints = sprints;
@@ -54,8 +66,20 @@ public class BoardProjectionConsumer {
 		this.disciplines = disciplines;
 		this.plans = plans;
 		this.boards = boards;
+		this.dltCounter = Counter.builder("kafka.dlt.messages")
+				.description("Сообщения, ушедшие в dead-letter topic")
+				.register(meterRegistry);
 	}
 
+	@RetryableTopic(
+			attempts = "4",
+			backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000),
+			dltStrategy = DltStrategy.FAIL_ON_ERROR,
+			topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
+			retryTopicSuffix = ".retry",
+			dltTopicSuffix = ".dlt",
+			exclude = {ConversionException.class, MessageConversionException.class,
+					IllegalArgumentException.class})
 	@KafkaListener(topics = {
 			Topics.TEAM_MEMBER,
 			Topics.SCHEDULE_SPRINT,
@@ -81,6 +105,13 @@ public class BoardProjectionConsumer {
 			log.error("Не удалось обновить проекцию доски: {}", json, e);
 			throw e instanceof RuntimeException re ? re : new IllegalStateException(e);
 		}
+	}
+
+	@DltHandler
+	public void onDlt(String payload,
+			@Header(name = KafkaHeaders.RECEIVED_TOPIC, required = false) String topic) {
+		dltCounter.increment();
+		log.error("Сообщение ушло в DLT топика {}: {}", topic, payload);
 	}
 
 	private void apply(String type, JsonNode payload) {
@@ -114,7 +145,11 @@ public class BoardProjectionConsumer {
 			}
 			case BacklogEvents.TASK_CREATED, BacklogEvents.TASK_UPDATED,
 					BacklogEvents.TASK_ESTIMATED, BacklogEvents.TASK_STATUS_CHANGED -> saveTask(payload);
-			case BacklogEvents.TASK_DELETED -> tasks.deleteById(uuid(payload, "taskId"));
+			case BacklogEvents.TASK_DELETED -> {
+				UUID taskId = uuid(payload, "taskId");
+				links.deleteAllByFromTaskIdOrToTaskId(taskId, taskId);
+				tasks.deleteById(taskId);
+			}
 			case BacklogEvents.LINK_ADDED -> {
 				Projections.LinkProj link = new Projections.LinkProj();
 				link.id = uuid(payload, "linkId");

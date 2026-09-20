@@ -5,4 +5,6 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import java.util.UUID;
 
 public interface LinkProjRepository extends MongoRepository<Projections.LinkProj, UUID> {
+
+	void deleteAllByFromTaskIdOrToTaskId(UUID fromTaskId, UUID toTaskId);
 }

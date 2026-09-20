@@ -86,6 +86,12 @@ public final class PlanningDtos {
 	public record ReleaseResponse(int releasedTasks) {
 	}
 
+	public record ReleaseTaskRequest(@NotNull UUID taskId, @NotNull UUID sagaId) {
+	}
+
+	public record ReleaseTaskResponse(int releasedAllocations) {
+	}
+
 	private PlanningDtos() {
 	}
 }

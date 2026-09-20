@@ -164,6 +164,21 @@ public class PlanningService {
 		return affectedTasks.size();
 	}
 
+	/**
+	 * Шаг саги удаления задачи: снимает все её аллокации. Идемпотентен — повтор
+	 * на уже пустой задаче возвращает ноль. Параметр {@code sagaId} нужен
+	 * вызывающей стороне для идемпотентности оркестрации; эффект здесь
+	 * определяется только {@code taskId}.
+	 */
+	@Transactional
+	public int releaseTaskAllocations(UUID taskId) {
+		List<Allocation> toRemove = allocations.findAllByPlanVersionIdAndTaskId(currentPlanId, taskId);
+		allocations.deleteAll(toRemove);
+		conflictDetector.recalculate();
+		publishSnapshot();
+		return toRemove.size();
+	}
+
 	@Transactional
 	public void recalculateAll() {
 		capacityService.recalculateAll();
