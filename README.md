@@ -31,69 +31,93 @@ deploy                docker-compose, observability, Keycloak, Postgres
 
 ## Запуск
 
-Требуются Docker и Docker Compose. JDK локально не нужен: сборка идёт внутри
-образа.
+Нужны Docker и Docker Compose. JDK локально не обязателен: бэкенд собирается
+внутри образов.
+
+### 1. Бэкенд
+
+Из каталога `deploy` поднимите инфраструктуру и сервисы (Postgres, Kafka,
+Keycloak, gateway, team/schedule/backlog/planning/bff). Вместе с ними стартует
+и контейнер `frontend` на порту 80 — его можно использовать сразу как UI
+(см. шаг 3) или поднять SPA отдельно через Vite (шаг 2).
+
+**Только приложение** (без Grafana/трейсов; OTEL-агент выключен):
 
 ```bash
 cd deploy
-docker compose up --build --force-recreate
+docker compose up -d --build
 ```
 
-Без observability-оверлея OTEL-агент **выключен** (`OTEL_JAVAAGENT_ENABLED=false`;
-entrypoint не вешает `-javaagent`), чтобы в логах не было
-`otel-collector: Name does not resolve`.
-
-С наблюдаемостью (Prometheus, Grafana, Tempo, OTel-агент):
+**Приложение + наблюдаемость** (Prometheus, Grafana, Tempo, OTel-агент):
 
 ```bash
 cd deploy
-docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build --force-recreate
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build --force-recreate
 ```
 
-Если в логах снова сыпется `UnknownHostException: otel-collector` — вы на базовом
-compose, но контейнеры ещё со старым агентом. Пересоберите и пересоздайте:
+Дождитесь healthy у Keycloak и gateway (`docker compose ps`). Gateway:
+[http://localhost:8080](http://localhost:8080).
+
+Если в логах сервисов сыпется `UnknownHostException: otel-collector`, вы на
+базовом compose со старым агентом в контейнере — пересоберите:
 
 ```bash
 cd deploy
 docker compose up -d --build --force-recreate
 ```
 
-| Компонент | Адрес |
+### 2. Фронтенд (опционально, для разработки)
+
+Контейнерный UI уже на [http://localhost/](http://localhost/) после шага 1.
+Для hot-reload поднимите Vite **после** бэкенда:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Откройте [http://localhost:5173](http://localhost:5173) — `/api` проксируется
+на gateway `:8080`. Подробнее: [`frontend/README.md`](frontend/README.md).
+
+### 3. Открыть UI
+
+| Вариант | Адрес |
 |---|---|
-| Frontend | http://localhost/ |
-| API Gateway | http://localhost:8080 |
-| Keycloak | http://localhost:8090 (admin/admin) |
-| Grafana | http://localhost:3000 (admin/admin) |
-| Prometheus | http://localhost:9090 |
+| UI из Docker (после шага 1) | [http://localhost/](http://localhost/) |
+| UI через Vite (после шага 2) | [http://localhost:5173](http://localhost:5173) |
 
-### Как открыть Grafana
+Вход в приложении — через Keycloak (realm `timeline`):
 
-1. Поднимите стек **с observability-оверлеем** (без него Grafana не стартует):
+| Логин | Пароль | Роль |
+|---|---|---|
+| `anna.admin` | `admin123` | ADMIN |
+| `petr.dev` | `member123` | MEMBER |
+| `olga.qa` | `member123` | MEMBER |
+
+Keycloak admin-консоль: [http://localhost:8090](http://localhost:8090)
+(`admin` / `admin`).
+
+### 4. Открыть Grafana
+
+Grafana есть **только** при запуске с observability-оверлеем (команда из шага 1
+с двумя `-f`). Без оверлея контейнер Grafana не стартует.
+
+1. Проверьте контейнер:
 
 ```bash
 cd deploy
-docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
-```
-
-2. Дождитесь готовности контейнера:
-
-```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml ps grafana
 ```
 
-3. Откройте в браузере: [http://localhost:3000](http://localhost:3000)
+2. Откройте [http://localhost:3000](http://localhost:3000)
 
-4. Войдите:
-   - логин: `admin`
-   - пароль: `admin`
-   - анонимный просмотр тоже включён (роль Viewer) — можно сразу смотреть дашборды без входа.
+3. Войдите: логин `admin`, пароль `admin`  
+   (анонимный просмотр с ролью Viewer тоже включён — дашборды можно смотреть без входа).
 
-5. Дашборд: меню **Dashboards** → папка **Timeline** → **Timeline Overview**  
-   (файл `deploy/observability/grafana/dashboards/timeline-overview.json`).
+4. Дашборд: **Dashboards** → папка **Timeline** → **Timeline Overview**.
 
-6. Источники данных уже провижены:
-   - **Prometheus** — метрики сервисов (`:9090`)
-   - **Tempo** — трейсы (`:3200`); в Explore можно искать spans по сервису.
+Источники данных уже провижены: **Prometheus** (`:9090`) и **Tempo** (`:3200`).
 
 Остановить только наблюдаемость, оставив приложение:
 
@@ -102,13 +126,14 @@ cd deploy
 docker compose -f docker-compose.yml -f docker-compose.observability.yml stop grafana prometheus tempo otel-collector
 ```
 
-Преднастроенные пользователи realm `timeline`:
-
-| Логин | Пароль | Роль |
-|---|---|---|
-| `anna.admin` | `admin123` | ADMIN |
-| `petr.dev` | `member123` | MEMBER |
-| `olga.qa` | `member123` | MEMBER |
+| Компонент | Адрес |
+|---|---|
+| UI (Docker) | http://localhost/ |
+| UI (Vite) | http://localhost:5173 |
+| API Gateway | http://localhost:8080 |
+| Keycloak | http://localhost:8090 (admin/admin) |
+| Grafana | http://localhost:3000 (admin/admin) |
+| Prometheus | http://localhost:9090 |
 
 ## Проверка сценария
 
@@ -176,12 +201,6 @@ curl -N http://localhost:8080/api/v1/timeline/stream \
 Модульные тесты выполняются всегда. Интеграционные поднимают Postgres через
 Testcontainers и проверяют миграции вместе с ограничениями уровня СУБД; без
 запущенного Docker они пропускаются, а не падают.
-
-Фронтенд локально:
-
-```bash
-cd frontend && npm install && npm run dev
-```
 
 ## Статус реализации
 
