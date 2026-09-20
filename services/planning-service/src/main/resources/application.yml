@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: planning-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/planning}
+    username: ${DB_USER:planning}
+    password: ${DB_PASSWORD:planning}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration,classpath:db/migration/common
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: planning-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8090/realms/timeline}
+          jwk-set-uri: ${OIDC_JWKS:http://localhost:8090/realms/timeline/protocol/openid-connect/certs}
+
+server:
+  port: ${PORT:8085}
+
+timeline:
+  outbox:
+    poll-interval: 500
+  planning:
+    # Единственная версия плана в первой версии продукта (what-if отложен).
+    current-plan-id: 00000000-0000-0000-0000-000000000001
+    reference-working-days: 10
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: planning-service
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-}]"
