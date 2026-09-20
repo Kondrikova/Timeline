@@ -42,9 +42,12 @@ export function renderPlanningTab(root, ctx) {
             `<option value="${status}" ${statusFilter === status ? 'selected' : ''}>${status}</option>`).join('')}
         </select>
         <button class="btn-ghost" type="button" id="reload-board">Обновить</button>
-        ${isAdmin ? `<button class="btn-primary" type="button" id="btn-move">Перенести задачу…</button>` : ''}
+        ${isAdmin ? `
+          <button class="btn-primary" type="button" id="btn-move">Перенести задачу…</button>
+        ` : ''}
         <span class="chip warn" id="conflicts-chip">${conflictCount ? `конфликты: ${conflictCount}` : 'конфликтов нет'}</span>
       </div>
+      <p class="hint">Оценки ролей и размещение задачи в спринт — на вкладке «Задачи и эпики». Velocity и отпуска — на «Команда и отпуска».</p>
       <div class="board-wrap" id="board-root"></div>
     `;
 
