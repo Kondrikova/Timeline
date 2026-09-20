@@ -222,6 +222,10 @@ table.board {
   min-width: 720px;
 }
 
+table.board.board-roles {
+  min-width: max(960px, 100%);
+}
+
 .board th, .board td {
   border-bottom: 1px solid var(--line);
   border-right: 1px solid rgba(197, 211, 223, 0.55);
@@ -234,10 +238,78 @@ table.board {
   position: sticky;
   top: 0;
   background: #edf3f7;
-  z-index: 1;
+  z-index: 2;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 0.95rem;
+}
+
+.board thead tr:nth-child(2) th {
+  top: 4.25rem;
+  z-index: 1;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.8rem;
+  vertical-align: top;
+}
+
+.board th.task-head {
+  left: 0;
+  z-index: 3;
+  min-width: 11rem;
+}
+
+.board td.task-cell {
+  position: sticky;
+  left: 0;
+  background: var(--paper, #f7fafc);
+  z-index: 1;
+  min-width: 11rem;
+}
+
+.board .task-row.selected td.task-cell {
+  background: rgba(15, 122, 108, 0.12);
+}
+
+.board th.sprint-group {
+  text-align: center;
+  border-left: 2px solid rgba(15, 122, 108, 0.35);
+}
+
+.board th.role-head,
+.board td.role-cell {
+  text-align: center;
+  min-width: 4.5rem;
+  max-width: 6.5rem;
+  padding: 0.45rem 0.4rem;
+}
+
+.board td.role-cell.sprint-start,
+.board th.sprint-group {
+  border-left: 2px solid rgba(15, 122, 108, 0.35);
+}
+
+.board thead tr.role-head-row th.role-head:nth-child(4n + 1) {
+  border-left: 2px solid rgba(15, 122, 108, 0.35);
+}
+
+.role-code {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+.role-cap {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.role-cap.over {
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .board th small {

@@ -45,6 +45,8 @@ export function renderPlanningTab(root, ctx) {
     const sprints = board.sprints || [];
     const epics = board.epics || [];
     const tasks = epics.flatMap((epic) => epic.tasks || []);
+    const roles = collectRoles(sprints);
+    const colCount = 1 + sprints.length * Math.max(roles.length, 1);
 
     root.innerHTML = `
       <div class="toolbar">
@@ -59,45 +61,67 @@ export function renderPlanningTab(root, ctx) {
         ` : ''}
         <span class="chip warn" id="conflicts-chip">${conflictCount ? `конфликты: ${conflictCount}` : 'конфликтов нет'}</span>
       </div>
-      <p class="hint">Оценки ролей и размещение задачи в спринт — на вкладке «Задачи и эпики». Velocity и отпуска — на «Команда и отпуска».</p>
+      <p class="hint">В каждом спринте — колонки ролей (BE/FE/QA/SA). В ячейке SP аллокации этой роли.</p>
       <div class="board-wrap" id="board-root"></div>
     `;
 
     const tableRoot = root.querySelector('#board-root');
-    const head = `
-      <tr>
-        <th>Задача</th>
-        ${sprints.map((sprint) => `
-          <th>
-            <div class="sprint-title">${escapeHtml(sprint.name || `Sprint ${sprint.number}`)}</div>
-            <small class="sprint-dates">${escapeHtml(sprint.startDate || '')} — ${escapeHtml(sprint.endDate || '')}</small>
-            <div class="capacity">${capacityHtml(sprint)}</div>
-          </th>`).join('')}
-      </tr>`;
+    const roleCount = Math.max(roles.length, 1);
+    const sprintHeaders = sprints.map((sprint) => {
+      const workingDays = sprint.workingDays
+        ?? inferWorkingDays(sprint.startDate, sprint.endDate);
+      return `
+        <th class="sprint-group" colspan="${roleCount}">
+          <div class="sprint-title">${escapeHtml(sprint.name || `Sprint ${sprint.number}`)}</div>
+          <small class="sprint-dates">${escapeHtml(sprint.startDate || '')} — ${escapeHtml(sprint.endDate || '')}</small>
+          <div class="capacity-days">раб. дней: ${escapeHtml(String(workingDays))}</div>
+        </th>`;
+    }).join('');
+
+    const roleHeaders = sprints.map((sprint) => {
+      if (!roles.length) {
+        return '<th class="role-head">—</th>';
+      }
+      return roles.map((role) => {
+        const cap = (sprint.capacity || []).find((cell) =>
+          cell.disciplineId === role.id || cell.disciplineCode === role.code);
+        return `<th class="role-head">${roleCapacityHead(role, cap)}</th>`;
+      }).join('');
+    }).join('');
 
     const body = epics.map((epic) => {
       const filtered = (epic.tasks || []).filter((task) =>
         statusFilter === 'ALL' || task.status === statusFilter);
       const epicRow = `
         <tr class="epic-row">
-          <td colspan="${Math.max(sprints.length, 0) + 1}">${escapeHtml(epic.key || '—')} · ${escapeHtml(epic.name || 'Без эпика')}</td>
+          <td colspan="${colCount}">${escapeHtml(epic.key || '—')} · ${escapeHtml(epic.name || 'Без эпика')}</td>
         </tr>`;
       const taskRows = filtered.map((task) => {
         const selected = selectedTaskId === task.id ? 'selected' : '';
         return `
           <tr class="task-row ${selected}" data-task-id="${task.id}">
-            <td>
+            <td class="task-cell">
               <span class="task-key">${escapeHtml(task.key)}</span>
               <span class="task-title">${escapeHtml(task.title)}</span>
               <span class="status">${escapeHtml(task.status)}</span>
             </td>
-            ${sprints.map((sprint) => cellHtml(task, sprint.id)).join('')}
+            ${sprints.map((sprint) => roleCellsHtml(task, sprint, roles)).join('')}
           </tr>`;
       }).join('');
       return epicRow + taskRows;
     }).join('');
 
-    tableRoot.innerHTML = `<table class="board"><thead>${head}</thead><tbody>${body || emptyRow(sprints.length)}</tbody></table>`;
+    tableRoot.innerHTML = `
+      <table class="board board-roles">
+        <thead>
+          <tr>
+            <th class="task-head" rowspan="2">Задача</th>
+            ${sprintHeaders || ''}
+          </tr>
+          <tr class="role-head-row">${roleHeaders || '<th class="role-head">—</th>'}</tr>
+        </thead>
+        <tbody>${body || emptyRow(colCount)}</tbody>
+      </table>`;
 
     root.querySelector('#status-filter').onchange = (event) => {
       setStatusFilter(event.target.value);
@@ -281,44 +305,69 @@ function formatShift(delta) {
   return `сдвиг назад на ${abs} ${unit}`;
 }
 
-function emptyRow(sprintCount) {
-  return `<tr><td colspan="${sprintCount + 1}" class="cell-empty">Пока нет задач</td></tr>`;
+function emptyRow(colCount) {
+  return `<tr><td colspan="${colCount}" class="cell-empty">Пока нет задач</td></tr>`;
 }
 
-function capacityHtml(sprint) {
-  const cells = sortCapacity(sprint.capacity || []);
-  const workingDays = sprint.workingDays
-    ?? inferWorkingDays(sprint.startDate, sprint.endDate);
-  const lines = [
-    `<div class="capacity-days">раб. дней: ${escapeHtml(String(workingDays))}</div>`,
-  ];
-  if (!cells.length) {
-    lines.push('<div>ёмкость появится после пересчёта плана</div>');
-    return lines.join('');
-  }
-  for (const cell of cells) {
-    const free = cell.freeSp ?? '—';
-    const over = cell.overloaded ? ' over' : '';
-    lines.push(
-      `<div class="capacity-role${over}">${escapeHtml(cell.disciplineCode || '?')}: `
-      + `cap ${escapeHtml(fmtSp(cell.capacitySp))} / alloc ${escapeHtml(fmtSp(cell.allocatedSp))}`
-      + ` / free ${escapeHtml(fmtSp(free))}</div>`,
-    );
-  }
-  return lines.join('');
-}
-
-function sortCapacity(cells) {
-  return [...cells].sort((a, b) => {
-    const ai = ROLE_ORDER.indexOf(a.disciplineCode);
-    const bi = ROLE_ORDER.indexOf(b.disciplineCode);
-    const av = ai === -1 ? 99 : ai;
-    const bv = bi === -1 ? 99 : bi;
-    if (av !== bv) {
-      return av - bv;
+function collectRoles(sprints) {
+  const byId = new Map();
+  for (const sprint of sprints) {
+    for (const cell of sprint.capacity || []) {
+      if (!cell.disciplineId) {
+        continue;
+      }
+      if (!byId.has(cell.disciplineId)) {
+        byId.set(cell.disciplineId, {
+          id: cell.disciplineId,
+          code: cell.disciplineCode || '?',
+        });
+      }
     }
-    return String(a.disciplineCode || '').localeCompare(String(b.disciplineCode || ''));
+  }
+  const roles = [...byId.values()];
+  if (!roles.length) {
+    return ROLE_ORDER.map((code) => ({ id: null, code }));
+  }
+  return roles.sort((a, b) => {
+    const ai = ROLE_ORDER.indexOf(a.code);
+    const bi = ROLE_ORDER.indexOf(b.code);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+      || String(a.code).localeCompare(String(b.code));
   });
+}
+
+function roleCapacityHead(role, cap) {
+  if (!cap) {
+    return `
+      <div class="role-code">${escapeHtml(role.code)}</div>
+      <div class="role-cap meta">cap —</div>`;
+  }
+  const over = cap.overloaded ? ' over' : '';
+  return `
+    <div class="role-code">${escapeHtml(role.code)}</div>
+    <div class="role-cap${over}">
+      <div>cap ${escapeHtml(fmtSp(cap.capacitySp))}</div>
+      <div>alloc ${escapeHtml(fmtSp(cap.allocatedSp))}</div>
+      <div>free ${escapeHtml(fmtSp(cap.freeSp))}</div>
+    </div>`;
+}
+
+function roleCellsHtml(task, sprint, roles) {
+  if (!roles.length) {
+    return '<td class="cell-empty role-cell">—</td>';
+  }
+  return roles.map((role, index) => {
+    const cell = (task.cells || []).find((item) =>
+      item.sprintId === sprint.id && role.id && item.disciplineId === role.id);
+    const startClass = index === 0 ? ' sprint-start' : '';
+    if (!cell) {
+      return `<td class="cell-empty role-cell${startClass}">—</td>`;
+    }
+    const conflict = (cell.conflicts || []).length ? 'conflict' : '';
+    return `<td class="role-cell${startClass}">
+      <div class="cell-sp ${conflict}">${escapeHtml(fmtSp(cell.plannedSp))}${conflict ? ' !' : ''}</div>
+    </td>`;
+  }).join('');
 }
 
 function fmtSp(value) {
@@ -349,15 +398,4 @@ function inferWorkingDays(start, end) {
     }
   }
   return days;
-}
-
-function cellHtml(task, sprintId) {
-  const cells = (task.cells || []).filter((cell) => cell.sprintId === sprintId);
-  if (!cells.length) {
-    return '<td class="cell-empty">—</td>';
-  }
-  return `<td>${cells.map((cell) => {
-    const conflict = (cell.conflicts || []).length ? 'conflict' : '';
-    return `<div class="cell-sp ${conflict}">${escapeHtml(String(cell.plannedSp))}${conflict ? ' !' : ''}</div>`;
-  }).join('')}</td>`;
 }
