@@ -3,30 +3,72 @@ import { escapeHtml, ensureOk } from '../dom.js';
 import { openModal } from '../modal.js';
 
 const VACATION_TYPES = ['VACATION', 'SICK', 'DAYOFF'];
+const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
 
 export function renderTeamTab(root, ctx) {
   const { token, isAdmin, onChanged, showError } = ctx;
   let disciplines = [];
   let members = [];
+  let directory = [];
+  let me = null;
   let disciplineFilter = 'ALL';
 
   async function reload() {
     root.innerHTML = '<p class="meta">Загрузка команды…</p>';
     try {
-      const [dRes, mRes] = await Promise.all([
+      const requests = [
         api('/api/v1/disciplines', { token }),
         api('/api/v1/team/members', { token }),
-      ]);
-      await ensureOk(dRes, 'Не удалось загрузить роли');
-      await ensureOk(mRes, 'Не удалось загрузить сотрудников');
-      disciplines = await dRes.json();
-      members = await mRes.json();
+        api('/api/v1/team/me', { token }),
+      ];
+      if (isAdmin) {
+        requests.push(api('/api/v1/team/directory', { token }));
+      }
+      const responses = await Promise.all(requests);
+      await ensureOk(responses[0], 'Не удалось загрузить роли');
+      await ensureOk(responses[1], 'Не удалось загрузить сотрудников');
+      disciplines = sortDisciplines(await responses[0].json());
+      members = await responses[1].json();
+      if (responses[2].ok) {
+        me = await responses[2].json();
+      }
+      else if (responses[2].status === 404) {
+        me = null;
+      }
+      else {
+        await ensureOk(responses[2], 'Не удалось загрузить профиль');
+      }
+      if (isAdmin) {
+        await ensureOk(responses[3], 'Не удалось загрузить каталог пользователей');
+        directory = await responses[3].json();
+      }
       paint();
     }
     catch (err) {
       root.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
       showError?.(err);
     }
+  }
+
+  function sortDisciplines(list) {
+    return [...list].sort((a, b) => {
+      const ai = ROLE_ORDER.indexOf(a.code);
+      const bi = ROLE_ORDER.indexOf(b.code);
+      const av = ai === -1 ? 99 : ai;
+      const bv = bi === -1 ? 99 : bi;
+      if (av !== bv) {
+        return av - bv;
+      }
+      return String(a.code).localeCompare(String(b.code));
+    });
+  }
+
+  function disciplineOptions(selectedId, { includeEmpty = false } = {}) {
+    const empty = includeEmpty
+      ? '<option value="">Не назначена</option>'
+      : '';
+    return empty + disciplines.map((d) =>
+      `<option value="${d.id}" ${selectedId === d.id ? 'selected' : ''}>${escapeHtml(d.code)} · ${escapeHtml(d.name)}</option>`).join('');
   }
 
   function paint() {
@@ -38,18 +80,27 @@ export function renderTeamTab(root, ctx) {
       <div class="admin-toolbar">
         <div>
           <h2 class="section-title">Команда и отпуска</h2>
-          <p class="hint">Ёмкость спринта считается из velocity роли и доступности с учётом отпусков.</p>
+          <p class="hint">Роли фиксированы: FE, BE, QA, SA. Ёмкость считается из velocity роли и доступности с учётом отпусков.</p>
         </div>
         <div class="actions">
-          ${isAdmin ? `
-            <button type="button" class="btn-ghost" id="btn-discipline">Новая роль</button>
-            <button type="button" class="btn-primary" id="btn-member">Сотрудник</button>
-          ` : ''}
           <button type="button" class="btn-ghost" id="btn-reload-team">Обновить</button>
         </div>
       </div>
 
-      <h3 class="subsection">Роли (дисциплины) и velocity</h3>
+      <section class="panel-block">
+        <h3 class="subsection">Моя роль</h3>
+        <p class="hint">Укажите профессиональную роль — она нужна для расчёта ёмкости и оценок.</p>
+        <form id="my-role-form" class="inline-form">
+          <label for="my-discipline">Роль</label>
+          <select id="my-discipline" name="disciplineId" required>
+            ${disciplineOptions(me?.disciplineId, { includeEmpty: !me })}
+          </select>
+          <button type="submit" class="btn-primary">Сохранить</button>
+          <span class="meta" id="my-role-status">${me ? escapeHtml(me.disciplineCode || '') : 'ещё не указана'}</span>
+        </form>
+      </section>
+
+      <h3 class="subsection">Роли и velocity</h3>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -64,10 +115,12 @@ export function renderTeamTab(root, ctx) {
                 <td class="row-actions">
                   ${isAdmin ? `<button type="button" class="linkish" data-edit-velocity="${d.id}">Velocity…</button>` : '—'}
                 </td>
-              </tr>`).join('') : '<tr><td colspan="4" class="cell-empty">Ролей пока нет</td></tr>'}
+              </tr>`).join('') : '<tr><td colspan="4" class="cell-empty">Роли не загружены (нужен seed FE/BE/QA/SA)</td></tr>'}
           </tbody>
         </table>
       </div>
+
+      ${isAdmin ? renderDirectory() : ''}
 
       <div class="admin-toolbar" style="margin-top:1.5rem">
         <h3 class="subsection" style="margin:0">Сотрудники и отпуска</h3>
@@ -93,25 +146,18 @@ export function renderTeamTab(root, ctx) {
                 <td class="mono">${escapeHtml(member.disciplineCode || '—')}</td>
                 <td>${vacationSummary(member.vacations || [])}</td>
                 <td class="row-actions">
-                  ${isAdmin ? `
+                  ${isAdmin || (me && me.id === member.id) ? `
                     <button type="button" class="linkish" data-vacations="${member.id}">Отпуска…</button>
                   ` : '—'}
                 </td>
-              </tr>`).join('') : '<tr><td colspan="4" class="cell-empty">Нет сотрудников</td></tr>'}
+              </tr>`).join('') : '<tr><td colspan="4" class="cell-empty">Нет сотрудников с назначенной ролью</td></tr>'}
           </tbody>
         </table>
       </div>
-
-      ${isAdmin ? '' : `
-        <h3 class="subsection">Мой отпуск</h3>
-        <div class="actions">
-          <button type="button" class="btn-primary" id="btn-my-vacation">Управлять своим отпуском</button>
-        </div>`}
     `;
 
     root.querySelector('#btn-reload-team')?.addEventListener('click', () => reload());
-    root.querySelector('#btn-discipline')?.addEventListener('click', () => openDisciplineModal());
-    root.querySelector('#btn-member')?.addEventListener('click', () => openMemberModal());
+    root.querySelector('#my-role-form')?.addEventListener('submit', onSaveMyRole);
     root.querySelector('#discipline-filter')?.addEventListener('change', (event) => {
       disciplineFilter = event.target.value;
       paint();
@@ -125,49 +171,105 @@ export function renderTeamTab(root, ctx) {
     root.querySelectorAll('[data-vacations]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const member = members.find((item) => item.id === btn.dataset.vacations);
-        openVacationsModal(member);
+        if (me && member && me.id === member.id && !isAdmin) {
+          paintVacationsModal(member, '/api/v1/team/me/vacations');
+        }
+        else {
+          openVacationsModal(member);
+        }
       });
     });
-    root.querySelector('#btn-my-vacation')?.addEventListener('click', () => openMyVacationModal());
+    root.querySelectorAll('[data-assign-user]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const user = directory.find((item) => item.userId === btn.dataset.assignUser);
+        openAssignModal(user);
+      });
+    });
   }
 
-  function vacationSummary(vacations) {
-    if (!vacations.length) {
-      return '<span class="cell-empty">нет</span>';
+  function renderDirectory() {
+    return `
+      <h3 class="subsection">Пользователи Keycloak</h3>
+      <p class="hint">Назначьте роль зарегистрированному пользователю — вводить Keycloak ID не нужно.</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Имя</th><th>Логин</th><th>Роль</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${directory.length ? directory.map((user) => `
+              <tr>
+                <td>${escapeHtml(user.fullName || '—')}${user.lead ? ' · lead' : ''}</td>
+                <td class="mono">${escapeHtml(user.username || '')}</td>
+                <td class="mono">${user.inTeam ? escapeHtml(user.disciplineCode || '—') : '<span class="cell-empty">не в команде</span>'}</td>
+                <td class="row-actions">
+                  <button type="button" class="linkish" data-assign-user="${escapeHtml(user.userId)}">Роль…</button>
+                </td>
+              </tr>`).join('') : '<tr><td colspan="4" class="cell-empty">Каталог пуст</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  async function onSaveMyRole(event) {
+    event.preventDefault();
+    const select = root.querySelector('#my-discipline');
+    const status = root.querySelector('#my-role-status');
+    if (!select?.value) {
+      return;
     }
-    return vacations.map((v) =>
-      `<div class="mono">${escapeHtml(v.startDate)} — ${escapeHtml(v.endDate)} · ${escapeHtml(v.type)}</div>`).join('');
+    try {
+      const res = await api('/api/v1/team/me/discipline', {
+        method: 'PUT',
+        token,
+        body: { disciplineId: select.value },
+      });
+      await ensureOk(res, 'Не удалось сохранить роль');
+      me = await res.json();
+      if (status) {
+        status.textContent = me.disciplineCode || 'сохранено';
+      }
+      await reload();
+      onChanged?.();
+    }
+    catch (err) {
+      showError?.(err);
+    }
   }
 
-  function openDisciplineModal() {
+  function openAssignModal(user) {
     const modal = openModal({
-      title: 'Новая роль',
+      title: `Роль · ${user.fullName || user.username}`,
       bodyHtml: `
-        <form id="discipline-form" class="modal-form">
-          <div class="field"><label>Код</label><input name="code" required placeholder="BACKEND" /></div>
-          <div class="field"><label>Название</label><input name="name" required placeholder="Разработка" /></div>
-          <div class="field"><label>Velocity, SP / спринт</label><input name="velocity" type="number" min="0.1" step="0.1" required value="20" /></div>
+        <form id="assign-form" class="modal-form">
+          <p class="hint">${escapeHtml(user.username || '')}${user.email ? ` · ${escapeHtml(user.email)}` : ''}</p>
+          <div class="field">
+            <label>Профессиональная роль</label>
+            <select name="disciplineId" required>
+              ${disciplineOptions(user.disciplineId)}
+            </select>
+          </div>
+          <div class="field"><label><input type="checkbox" name="lead" ${user.lead ? 'checked' : ''} /> Lead</label></div>
           <div class="actions">
             <button type="button" class="btn-ghost" data-close="1">Отмена</button>
-            <button type="submit" class="btn-primary">Создать</button>
+            <button type="submit" class="btn-primary">Назначить</button>
           </div>
         </form>`,
     });
-    modal.body.querySelector('#discipline-form').addEventListener('submit', async (event) => {
+    modal.body.querySelector('#assign-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const form = event.target;
       modal.setError('');
       try {
-        const res = await api('/api/v1/disciplines', {
-          method: 'POST',
+        const res = await api(`/api/v1/team/directory/${encodeURIComponent(user.userId)}/discipline`, {
+          method: 'PUT',
           token,
           body: {
-            code: form.code.value.trim(),
-            name: form.name.value.trim(),
-            velocitySpPerSprint: Number(form.velocity.value),
+            disciplineId: form.disciplineId.value,
+            lead: form.lead.checked,
           },
         });
-        await ensureOk(res, 'Не удалось создать роль');
+        await ensureOk(res, 'Не удалось назначить роль');
         modal.close();
         await reload();
         onChanged?.();
@@ -176,6 +278,14 @@ export function renderTeamTab(root, ctx) {
         modal.setError(err.message);
       }
     });
+  }
+
+  function vacationSummary(vacations) {
+    if (!vacations.length) {
+      return '<span class="cell-empty">нет</span>';
+    }
+    return vacations.map((v) =>
+      `<div class="mono">${escapeHtml(v.startDate)} — ${escapeHtml(v.endDate)} · ${escapeHtml(v.type)}</div>`).join('');
   }
 
   function openVelocityModal(discipline) {
@@ -215,69 +325,8 @@ export function renderTeamTab(root, ctx) {
     });
   }
 
-  function openMemberModal() {
-    const modal = openModal({
-      title: 'Новый сотрудник',
-      bodyHtml: `
-        <form id="member-form" class="modal-form">
-          <div class="field"><label>User ID (Keycloak sub)</label><input name="userId" required placeholder="22222222-2222-..." /></div>
-          <div class="field"><label>ФИО</label><input name="fullName" required /></div>
-          <div class="field">
-            <label>Роль</label>
-            <select name="disciplineId" required>
-              ${disciplines.map((d) => `<option value="${d.id}">${escapeHtml(d.code)} · ${escapeHtml(d.name)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="field"><label>Активен с</label><input name="activeFrom" type="date" required value="2026-01-01" /></div>
-          <div class="field"><label><input type="checkbox" name="lead" /> Lead</label></div>
-          <div class="actions">
-            <button type="button" class="btn-ghost" data-close="1">Отмена</button>
-            <button type="submit" class="btn-primary">Создать</button>
-          </div>
-        </form>`,
-    });
-    modal.body.querySelector('#member-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.target;
-      modal.setError('');
-      try {
-        const res = await api('/api/v1/team/members', {
-          method: 'POST',
-          token,
-          body: {
-            userId: form.userId.value.trim(),
-            fullName: form.fullName.value.trim(),
-            disciplineId: form.disciplineId.value,
-            lead: form.lead.checked,
-            activeFrom: form.activeFrom.value,
-            activeTo: null,
-          },
-        });
-        await ensureOk(res, 'Не удалось добавить сотрудника');
-        modal.close();
-        await reload();
-        onChanged?.();
-      }
-      catch (err) {
-        modal.setError(err.message);
-      }
-    });
-  }
-
   function openVacationsModal(member) {
     paintVacationsModal(member, `/api/v1/team/members/${member.id}/vacations`);
-  }
-
-  async function openMyVacationModal() {
-    try {
-      const res = await api('/api/v1/team/me', { token });
-      await ensureOk(res, 'Профиль не найден');
-      const me = await res.json();
-      paintVacationsModal(me, '/api/v1/team/me/vacations');
-    }
-    catch (err) {
-      showError?.(err);
-    }
   }
 
   function paintVacationsModal(member, basePath) {

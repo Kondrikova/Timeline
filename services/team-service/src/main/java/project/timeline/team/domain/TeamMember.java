@@ -104,6 +104,15 @@ public class TeamMember {
 		this.activeTo = activeTo;
 	}
 
+	/** Смена профессиональной роли (дисциплины) без изменения прочих полей. */
+	public void changeDiscipline(Discipline discipline) {
+		this.discipline = discipline;
+	}
+
+	public void rename(String fullName) {
+		this.fullName = fullName;
+	}
+
 	public boolean isOwnedBy(String candidateUserId) {
 		return userId.equals(candidateUserId);
 	}

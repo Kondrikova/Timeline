@@ -5,15 +5,23 @@ import org.springframework.transaction.annotation.Transactional;
 import project.timeline.common.events.team.TeamEvents;
 import project.timeline.common.web.DomainException;
 import project.timeline.common.web.security.CurrentUser;
+import project.timeline.team.api.dto.TeamDtos.DirectoryUserResponse;
 import project.timeline.team.domain.Discipline;
 import project.timeline.team.domain.TeamMember;
 import project.timeline.team.domain.Vacation;
 import project.timeline.team.domain.VacationType;
+import project.timeline.team.keycloak.KeycloakDirectoryClient;
+import project.timeline.team.keycloak.KeycloakUser;
 import project.timeline.team.repository.TeamMemberRepository;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class TeamService {
@@ -21,11 +29,14 @@ public class TeamService {
 	private final TeamMemberRepository members;
 	private final DisciplineService disciplines;
 	private final TeamEventPublisher events;
+	private final KeycloakDirectoryClient keycloak;
 
-	public TeamService(TeamMemberRepository members, DisciplineService disciplines, TeamEventPublisher events) {
+	public TeamService(TeamMemberRepository members, DisciplineService disciplines, TeamEventPublisher events,
+			KeycloakDirectoryClient keycloak) {
 		this.members = members;
 		this.disciplines = disciplines;
 		this.events = events;
+		this.keycloak = keycloak;
 	}
 
 	@Transactional(readOnly = true)
@@ -67,6 +78,75 @@ public class TeamService {
 		member.update(fullName, disciplines.require(disciplineId), lead, activeFrom, activeTo);
 		events.memberEvent(TeamEvents.MEMBER_UPDATED, member, CurrentUser.requireUserId());
 		return member;
+	}
+
+	/**
+	 * Текущий пользователь сам указывает профессиональную роль: создаёт профиль
+	 * команды при первом выборе или меняет дисциплину у уже существующего.
+	 */
+	@Transactional
+	public TeamMember assignMyDiscipline(UUID disciplineId) {
+		String userId = CurrentUser.requireUserId();
+		String fullName = CurrentUser.displayName();
+		Discipline discipline = disciplines.require(disciplineId);
+		Optional<TeamMember> existing = members.findByUserId(userId);
+		if (existing.isPresent()) {
+			TeamMember member = existing.get();
+			member.rename(fullName);
+			member.changeDiscipline(discipline);
+			events.memberEvent(TeamEvents.MEMBER_UPDATED, member, userId);
+			return member;
+		}
+		TeamMember created = members.save(
+				new TeamMember(userId, fullName, discipline, false, LocalDate.now(), null));
+		events.memberEvent(TeamEvents.MEMBER_JOINED, created, userId);
+		return created;
+	}
+
+	/**
+	 * Админ назначает роль пользователю из каталога Keycloak без ручного ввода sub.
+	 */
+	@Transactional
+	public TeamMember assignDirectoryDiscipline(String userId, UUID disciplineId, boolean lead) {
+		KeycloakUser user = keycloak.findById(userId)
+				.orElseThrow(() -> DomainException.notFound("KEYCLOAK_USER_NOT_FOUND",
+						"Пользователь не найден в Keycloak: " + userId));
+		Discipline discipline = disciplines.require(disciplineId);
+		Optional<TeamMember> existing = members.findByUserId(userId);
+		if (existing.isPresent()) {
+			TeamMember member = existing.get();
+			member.update(user.displayName(), discipline, lead, member.getActiveFrom(), member.getActiveTo());
+			events.memberEvent(TeamEvents.MEMBER_UPDATED, member, CurrentUser.requireUserId());
+			return member;
+		}
+		TeamMember created = members.save(
+				new TeamMember(userId, user.displayName(), discipline, lead, LocalDate.now(), null));
+		events.memberEvent(TeamEvents.MEMBER_JOINED, created, CurrentUser.requireUserId());
+		return created;
+	}
+
+	@Transactional(readOnly = true)
+	public List<DirectoryUserResponse> directory() {
+		Map<String, TeamMember> byUserId = findAll().stream()
+				.collect(Collectors.toMap(TeamMember::getUserId, Function.identity(), (a, b) -> a));
+		return keycloak.listUsers().stream()
+				.sorted(Comparator.comparing(KeycloakUser::displayName, String.CASE_INSENSITIVE_ORDER))
+				.map(user -> {
+					TeamMember member = byUserId.get(user.id());
+					if (member == null) {
+						return new DirectoryUserResponse(user.id(), user.username(), user.displayName(),
+								user.email(), false, null, null, null, false);
+					}
+					return new DirectoryUserResponse(user.id(), user.username(), member.getFullName(),
+							user.email(), true, member.getId(), member.getDiscipline().getId(),
+							member.getDiscipline().getCode(), member.isLead());
+				})
+				.toList();
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<TeamMember> findCurrentOptional() {
+		return members.findByUserId(CurrentUser.requireUserId());
 	}
 
 	@Transactional

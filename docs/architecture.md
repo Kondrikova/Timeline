@@ -1296,9 +1296,11 @@ SLO объявляются до прогона. Результат фиксир�
 посчитать нельзя.
 
 ```
-POST   /api/v1/disciplines                  роль + velocity, SP за эталонный спринт
+GET    /api/v1/disciplines                  справочник ролей FE / BE / QA / SA (+ velocity)
 PUT    /api/v1/disciplines/{id}/velocity    калибровка по факту закрытых спринтов
-POST   /api/v1/team/members                 сотрудник + дисциплина + период активности
+GET    /api/v1/team/directory               ADMIN: все пользователи Keycloak + текущая роль
+PUT    /api/v1/team/directory/{userId}/discipline   ADMIN: назначить роль без ввода Keycloak ID
+PUT    /api/v1/team/me/discipline           любой пользователь указывает себе роль
 PUT    /api/v1/calendar/days                выходные, праздники, переносы
 ```
 
@@ -1337,6 +1339,7 @@ POST   /api/v1/plan/recalculate                          полный перес
 
 ```
 GET    /api/v1/team/me
+PUT    /api/v1/team/me/discipline           указать/сменить профессиональную роль
 POST   /api/v1/team/me/vacations
 PUT    /api/v1/team/me/vacations/{id}
 DELETE /api/v1/team/me/vacations/{id}
