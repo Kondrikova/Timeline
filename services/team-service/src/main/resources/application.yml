@@ -41,8 +41,10 @@ timeline:
   keycloak:
     server-url: ${KEYCLOAK_URL:http://localhost:8090}
     realm: ${KEYCLOAK_REALM:timeline}
-    client-id: ${KEYCLOAK_CLIENT_ID:timeline-backend}
-    client-secret: ${KEYCLOAK_CLIENT_SECRET:timeline-backend-secret}
+    admin-realm: ${KEYCLOAK_ADMIN_REALM:master}
+    admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:admin-cli}
+    admin-username: ${KEYCLOAK_ADMIN_USER:admin}
+    admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
 
 management:
   endpoints:

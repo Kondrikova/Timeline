@@ -108,8 +108,8 @@ services:
       DB_PASSWORD: team
       KEYCLOAK_URL: http://keycloak:8090
       KEYCLOAK_REALM: timeline
-      KEYCLOAK_CLIENT_ID: timeline-backend
-      KEYCLOAK_CLIENT_SECRET: timeline-backend-secret
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
     ports:
       - "8082:8082"
     depends_on: &app-deps

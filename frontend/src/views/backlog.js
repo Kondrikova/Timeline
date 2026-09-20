@@ -49,7 +49,8 @@ export function renderBacklogTab(root, ctx) {
     return ids.map((id) => {
       const d = cache.disciplines.find((item) => item.id === id);
       const sp = estimates[id];
-      return `<div class="mono">${escapeHtml(d?.code || id.slice(0, 8))}: ${sp == null ? '—' : escapeHtml(String(sp))} SP</div>`;
+      const role = d ? `${d.code} · ${d.name}` : id.slice(0, 8);
+      return `<div class="mono">${escapeHtml(role)}: ${sp == null ? '—' : escapeHtml(String(sp))} SP</div>`;
     }).join('');
   }
 
@@ -311,21 +312,37 @@ export function renderBacklogTab(root, ctx) {
       return;
     }
     const current = task.estimates || {};
+    const ordered = [...cache.disciplines].sort((a, b) => {
+      const order = ['BE', 'FE', 'QA', 'SA'];
+      const ai = order.indexOf(a.code);
+      const bi = order.indexOf(b.code);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
     const modal = openModal({
       title: `Оценки · ${task.key}`,
       bodyHtml: `
         <form id="estimates-form" class="modal-form">
           <p class="hint">Отметьте роли, участвующие в задаче, и укажите SP. Пустое SP = роль участвует без оценки.</p>
-          ${cache.disciplines.map((d) => {
+          <div class="estimate-head">
+            <span>Роль</span>
+            <span>В задаче</span>
+            <span>SP</span>
+          </div>
+          ${ordered.map((d) => {
             const involved = Object.prototype.hasOwnProperty.call(current, d.id);
             const value = involved && current[d.id] != null ? current[d.id] : '';
             return `
               <div class="estimate-row">
+                <div class="estimate-role">
+                  <span class="role-code">${escapeHtml(d.code)}</span>
+                  <span class="role-name">${escapeHtml(d.name)}</span>
+                </div>
                 <label class="check">
                   <input type="checkbox" name="role-${d.id}" ${involved ? 'checked' : ''} />
-                  <span class="mono">${escapeHtml(d.code)}</span> ${escapeHtml(d.name)}
+                  <span>да</span>
                 </label>
-                <input type="number" min="0" step="0.5" name="sp-${d.id}" placeholder="SP" value="${escapeHtml(String(value))}" />
+                <input type="number" min="0" step="0.5" name="sp-${d.id}" placeholder="SP"
+                  aria-label="Оценка ${escapeHtml(d.code)}" value="${escapeHtml(String(value))}" />
               </div>`;
           }).join('')}
           <div class="actions">
@@ -339,7 +356,7 @@ export function renderBacklogTab(root, ctx) {
       const form = event.target;
       modal.setError('');
       const estimates = {};
-      for (const d of cache.disciplines) {
+      for (const d of ordered) {
         if (!form[`role-${d.id}`].checked) {
           continue;
         }
@@ -389,9 +406,10 @@ export function renderBacklogTab(root, ctx) {
             const estimate = task.estimates[id];
             const current = existing.find((item) => item.disciplineId === id);
             const def = current?.plannedSp ?? estimate ?? '';
+            const roleLabel = d ? `${d.code} · ${d.name}` : id;
             return `
               <div class="field">
-                <label>${escapeHtml(d?.code || id)} · planned SP</label>
+                <label>Роль ${escapeHtml(roleLabel)} — planned SP${estimate != null ? ` (оценка ${escapeHtml(String(estimate))})` : ''}</label>
                 <input name="sp-${id}" type="number" min="0" step="0.5" required value="${escapeHtml(String(def))}" />
               </div>`;
           }).join('')}
