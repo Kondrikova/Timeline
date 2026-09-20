@@ -21,6 +21,7 @@ services/team-service сотрудники, дисциплины с velocity, о
 services/schedule-service спринты, производственный календарь, сага удаления
 services/backlog-service  эпики, задачи, оценки в SP, связи трёх типов
 services/planning-service аллокации, ёмкость, каскад, конфликты
+services/timeline-bff     проекция доски (MongoDB) и SSE
 deploy                docker-compose, realm Keycloak, инициализация Postgres
 ```
 
@@ -77,7 +78,7 @@ curl -X POST http://localhost:8080/api/v1/team/members \
 
 Сотрудник корректирует свой отпуск:
 
-```bash
+```
 TOKEN=$(curl -s -X POST \
   http://localhost:8090/realms/timeline/protocol/openid-connect/token \
   -d grant_type=password -d client_id=timeline-web \
@@ -91,6 +92,17 @@ curl -X POST http://localhost:8080/api/v1/team/me/vacations \
 Повторный запрос на пересекающийся период вернёт `409` с кодом
 `VACATION_OVERLAP`, а попытка изменить чужой отпуск — `403` с кодом
 `NOT_OWN_VACATION`.
+
+Доска плана (один запрос) и поток обновлений:
+
+```bash
+curl -s http://localhost:8080/api/v1/timeline/board \
+  -H "Authorization: Bearer $TOKEN" | jq '.conflictsSummary,.sprints[0].capacity'
+
+# SSE: события board-updated приходят после пересчёта плана
+curl -N http://localhost:8080/api/v1/timeline/stream \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 ## Сборка и тесты
 
@@ -111,7 +123,7 @@ Testcontainers и проверяют миграции вместе с огран
 | `schedule-service` | готово |
 | `backlog-service` | готово |
 | `planning-service` | готово |
-| `timeline-bff` | не начат |
+| `timeline-bff` | готово |
 | Саги удаления задачи, DLQ | не начаты (сага удаления спринта есть) |
 | Наблюдаемость | базовая: метрики и health |
 | Postman, k6, фронтенд | не начаты |

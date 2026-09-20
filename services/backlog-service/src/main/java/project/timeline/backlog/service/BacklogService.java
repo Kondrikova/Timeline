@@ -54,7 +54,10 @@ public class BacklogService {
 		if (epics.existsByKey(key)) {
 			throw DomainException.conflict("EPIC_EXISTS", "Эпик с ключом " + key + " уже существует");
 		}
-		return epics.save(new Epic(key, name, color, orderIndex));
+		Epic epic = epics.save(new Epic(key, name, color, orderIndex));
+		events.epicEvent(project.timeline.common.events.backlog.BacklogEpicEvents.EPIC_CREATED,
+				epic, CurrentUser.requireUserId());
+		return epic;
 	}
 
 	@Transactional(readOnly = true)

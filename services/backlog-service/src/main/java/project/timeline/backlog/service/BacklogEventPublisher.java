@@ -1,10 +1,12 @@
 package project.timeline.backlog.service;
 
 import org.springframework.stereotype.Component;
+import project.timeline.backlog.domain.Epic;
 import project.timeline.backlog.domain.Task;
 import project.timeline.backlog.domain.TaskLink;
 import project.timeline.common.events.DomainEvent;
 import project.timeline.common.events.Topics;
+import project.timeline.common.events.backlog.BacklogEpicEvents;
 import project.timeline.common.events.backlog.BacklogEvents;
 import project.timeline.common.outbox.OutboxPublisher;
 import project.timeline.common.web.RequestCorrelationFilter;
@@ -16,6 +18,17 @@ public class BacklogEventPublisher {
 
 	public BacklogEventPublisher(OutboxPublisher outbox) {
 		this.outbox = outbox;
+	}
+
+	public void epicEvent(String eventType, Epic epic, String actorId) {
+		outbox.publish(Topics.BACKLOG_EPIC, DomainEvent.of(
+				eventType,
+				"Epic",
+				epic.getId(),
+				actorId,
+				RequestCorrelationFilter.currentTraceId(),
+				new BacklogEpicEvents.EpicPayload(
+						epic.getId(), epic.getKey(), epic.getName(), epic.getColor(), epic.getOrderIndex())));
 	}
 
 	public void taskEvent(String eventType, Task task, String actorId) {

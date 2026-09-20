@@ -52,6 +52,15 @@ spring:
                   args:
                     name: backlogCircuitBreaker
                     fallbackUri: forward:/fallback/backlog-service
+            - id: timeline-bff
+              uri: ${TIMELINE_BFF_URI:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/timeline/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: bffCircuitBreaker
+                    fallbackUri: forward:/fallback/timeline-bff
             - id: planning-service
               uri: ${PLANNING_SERVICE_URI:http://localhost:8085}
               predicates:
@@ -78,6 +87,8 @@ resilience4j:
         baseConfig: default
       planningCircuitBreaker:
         baseConfig: default
+      bffCircuitBreaker:
+        baseConfig: default
   timelimiter:
     configs:
       default:
@@ -90,6 +101,8 @@ resilience4j:
       backlogCircuitBreaker:
         baseConfig: default
       planningCircuitBreaker:
+        baseConfig: default
+      bffCircuitBreaker:
         baseConfig: default
 
 server:

@@ -36,11 +36,12 @@ public class PlanningService {
 	private final RefTaskLinkRepository links;
 	private final CapacityService capacityService;
 	private final ConflictDetector conflictDetector;
+	private final PlanningEventPublisher events;
 	private final UUID currentPlanId;
 
 	public PlanningService(AllocationRepository allocations, RefSprintRepository sprints,
 			RefTaskRepository tasks, RefTaskLinkRepository links, CapacityService capacityService,
-			ConflictDetector conflictDetector,
+			ConflictDetector conflictDetector, PlanningEventPublisher events,
 			@Value("${timeline.planning.current-plan-id}") UUID currentPlanId) {
 		this.allocations = allocations;
 		this.sprints = sprints;
@@ -48,6 +49,7 @@ public class PlanningService {
 		this.links = links;
 		this.capacityService = capacityService;
 		this.conflictDetector = conflictDetector;
+		this.events = events;
 		this.currentPlanId = currentPlanId;
 	}
 
@@ -97,6 +99,7 @@ public class PlanningService {
 				.forEach(allocations::delete);
 		List<Allocation> saved = allocations.saveAll(replacement);
 		conflictDetector.recalculate();
+		publishSnapshot();
 		return saved;
 	}
 
@@ -143,6 +146,7 @@ public class PlanningService {
 
 		applyShifts(plan, orderedSprints, indexById, shifts);
 		List<PlanConflict> conflicts = conflictDetector.recalculate();
+		publishSnapshot();
 		return new MoveResult(false, shifts, conflicts);
 	}
 
@@ -156,6 +160,7 @@ public class PlanningService {
 		Set<UUID> affectedTasks = toRemove.stream().map(Allocation::getTaskId).collect(Collectors.toSet());
 		allocations.deleteAll(toRemove);
 		conflictDetector.recalculate();
+		publishSnapshot();
 		return affectedTasks.size();
 	}
 
@@ -163,6 +168,7 @@ public class PlanningService {
 	public void recalculateAll() {
 		capacityService.recalculateAll();
 		conflictDetector.recalculate();
+		publishSnapshot();
 	}
 
 	private void applyShifts(List<Allocation> plan, List<RefSprint> orderedSprints,
@@ -210,6 +216,13 @@ public class PlanningService {
 				link.getFromTaskId(),
 				link.getToTaskId(),
 				link.isSimultaneous() ? PlanGraph.Kind.SIMULTANEOUS : PlanGraph.Kind.ORDERED);
+	}
+
+	private void publishSnapshot() {
+		events.planRecalculated(
+				allocations.findAllByPlanVersionId(currentPlanId),
+				capacityService.current(),
+				conflictDetector.current());
 	}
 
 	public record AllocationDraft(UUID sprintId, UUID disciplineId, BigDecimal plannedSp) {
