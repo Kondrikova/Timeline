@@ -15,12 +15,14 @@ RUN cp services/${SERVICE}/build/libs/*.jar /src/app.jar
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-# Агент подключается через JAVA_TOOL_OPTIONS только в observability-оверлее —
-# без него сервисы стартуют как обычно.
+# JAR агента лежит в образе; подключение — только через entrypoint при
+# OTEL_JAVAAGENT_ENABLED=true (см. docker-compose.observability.yml).
 ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.12.0/opentelemetry-javaagent.jar \
     /otel/opentelemetry-javaagent.jar
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN addgroup -S timeline && adduser -S timeline -G timeline \
-    && chown -R timeline:timeline /otel
+    && chown -R timeline:timeline /otel /app/docker-entrypoint.sh \
+    && chmod +x /app/docker-entrypoint.sh
 COPY --from=build /src/app.jar app.jar
 USER timeline
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

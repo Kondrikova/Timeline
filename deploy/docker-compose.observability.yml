@@ -11,7 +11,9 @@ name: timeline
 # иначе сотрётся ожидание Postgres/Kafka/Keycloak из базового compose.
 
 x-otel: &otel-env
-  JAVA_TOOL_OPTIONS: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  # Агент подключает deploy/docker-entrypoint.sh при OTEL_JAVAAGENT_ENABLED=true
+  # (не через JAVA_TOOL_OPTIONS — иначе при уходе с оверлея агент мог остаться).
+  JAVA_TOOL_OPTIONS: ""
   OTEL_JAVAAGENT_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
