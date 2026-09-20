@@ -60,6 +60,22 @@ public class BacklogService {
 		return epic;
 	}
 
+	@Transactional
+	public Epic updateEpic(UUID id, String name, String color, int orderIndex) {
+		Epic epic = epics.findById(id)
+				.orElseThrow(() -> DomainException.notFound("EPIC_NOT_FOUND", "Эпик не найден: " + id));
+		epic.update(name, color, orderIndex);
+		events.epicEvent(project.timeline.common.events.backlog.BacklogEpicEvents.EPIC_UPDATED,
+				epic, CurrentUser.requireUserId());
+		return epic;
+	}
+
+	@Transactional(readOnly = true)
+	public Epic requireEpic(UUID id) {
+		return epics.findById(id)
+				.orElseThrow(() -> DomainException.notFound("EPIC_NOT_FOUND", "Эпик не найден: " + id));
+	}
+
 	@Transactional(readOnly = true)
 	public List<Task> findTasks(UUID epicId, TaskStatus status) {
 		if (epicId != null && status != null) {
