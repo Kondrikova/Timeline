@@ -54,6 +54,9 @@ docker compose up --build
 
 ## Проверка сценария
 
+Коллекция Postman: [`postman/Timeline.postman_collection.json`](postman/Timeline.postman_collection.json)
+(папки по сценариям 0–5 + саги, OIDC password grant, тесты на шагах).
+
 Получить токен:
 
 ```bash
@@ -126,4 +129,5 @@ Testcontainers и проверяют миграции вместе с огран
 | `timeline-bff` | готово |
 | Саги удаления (спринт и задача), retry/DLT | готово |
 | Наблюдаемость | базовая: метрики и health |
-| Postman, k6, фронтенд | не начаты |
+| Postman | готово (`postman/Timeline.postman_collection.json`) |
+| k6, фронтенд | не начаты |
