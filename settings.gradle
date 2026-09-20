@@ -1,8 +1,1 @@
-rootProject.name = 'timeline'
-
-include 'libs:common-events'
-include 'libs:common-outbox'
-include 'libs:common-web'
-
-include 'services:api-gateway'
-include 'services:team-service'
+rootProject.name = 'Timeline'
