@@ -80,12 +80,13 @@ export function renderPlanningTab(root, ctx) {
 
     const roleHeaders = sprints.map((sprint) => {
       if (!roles.length) {
-        return '<th class="role-head">—</th>';
+        return '<th class="role-head sprint-start">—</th>';
       }
-      return roles.map((role) => {
+      return roles.map((role, index) => {
         const cap = (sprint.capacity || []).find((cell) =>
           cell.disciplineId === role.id || cell.disciplineCode === role.code);
-        return `<th class="role-head">${roleCapacityHead(role, cap)}</th>`;
+        const startClass = index === 0 ? ' sprint-start' : '';
+        return `<th class="role-head${startClass}">${roleCapacityHead(role, cap)}</th>`;
       }).join('');
     }).join('');
 

@@ -285,11 +285,8 @@ table.board.board-roles {
 }
 
 .board td.role-cell.sprint-start,
+.board th.role-head.sprint-start,
 .board th.sprint-group {
-  border-left: 2px solid rgba(15, 122, 108, 0.35);
-}
-
-.board thead tr.role-head-row th.role-head:nth-child(4n + 1) {
   border-left: 2px solid rgba(15, 122, 108, 0.35);
 }
 
