@@ -33,4 +33,12 @@ class BoardCapacityMathTest {
 		assertThat(free).isEqualByComparingTo("-4");
 		assertThat(overloaded).isTrue();
 	}
+
+	@Test
+	@DisplayName("рабочие дни спринта считаются без выходных")
+	void countsWeekdays() {
+		assertThat(BoardAssembler.workingDaysBetween(
+				java.time.LocalDate.of(2026, 9, 21),
+				java.time.LocalDate.of(2026, 10, 4))).isEqualTo(10);
+	}
 }

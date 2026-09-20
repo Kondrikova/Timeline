@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { escapeHtml, ensureOk } from '../dom.js';
 import { openModal } from '../modal.js';
+import { bindDateRange, dateRangeFieldHtml } from '../date-range.js';
 
 const VACATION_TYPES = ['VACATION', 'SICK', 'DAYOFF'];
 const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
@@ -330,11 +331,17 @@ export function renderTeamTab(root, ctx) {
   }
 
   function paintVacationsModal(member, basePath) {
-    const vacations = member.vacations || [];
+    let working = { ...(member || {}), vacations: [...(member.vacations || [])] };
     const modal = openModal({
       title: `Отпуска · ${member.fullName}`,
-      bodyHtml: `
-        <div class="modal-form">
+      wide: true,
+      bodyHtml: `<div class="vacation-panel" id="vacation-panel"></div>`,
+    });
+
+    function renderList() {
+      const vacations = working.vacations || [];
+      modal.body.querySelector('#vacation-panel').innerHTML = `
+        <div class="vacation-list">
           <div class="table-wrap">
             <table class="data-table">
               <thead><tr><th>Период</th><th>Тип</th><th></th></tr></thead>
@@ -355,44 +362,47 @@ export function renderTeamTab(root, ctx) {
             <button type="button" class="btn-primary" id="btn-add-vac">Добавить отпуск</button>
             <button type="button" class="btn-ghost" data-close="1">Закрыть</button>
           </div>
-        </div>`,
-    });
+        </div>`;
 
-    modal.body.querySelector('#btn-add-vac').onclick = () => openVacationForm(modal, member, basePath, null);
-    modal.body.querySelectorAll('[data-edit-vac]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const vacation = vacations.find((item) => item.id === btn.dataset.editVac);
-        openVacationForm(modal, member, basePath, vacation);
+      modal.body.querySelector('#btn-add-vac').onclick = () => renderForm(null);
+      modal.body.querySelectorAll('[data-edit-vac]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const vacation = vacations.find((item) => item.id === btn.dataset.editVac);
+          renderForm(vacation);
+        });
       });
-    });
-    modal.body.querySelectorAll('[data-del-vac]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Удалить отпуск?')) {
-          return;
-        }
-        try {
-          const res = await api(`${basePath}/${btn.dataset.delVac}`, { method: 'DELETE', token });
-          await ensureOk(res, 'Не удалось удалить отпуск');
-          modal.close();
-          await reload();
-          onChanged?.();
-        }
-        catch (err) {
-          modal.setError(err.message);
-        }
+      modal.body.querySelectorAll('[data-del-vac]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Удалить отпуск?')) {
+            return;
+          }
+          try {
+            const res = await api(`${basePath}/${btn.dataset.delVac}`, { method: 'DELETE', token });
+            await ensureOk(res, 'Не удалось удалить отпуск');
+            working.vacations = working.vacations.filter((item) => item.id !== btn.dataset.delVac);
+            modal.setError('');
+            renderList();
+            await reload();
+            onChanged?.();
+          }
+          catch (err) {
+            modal.setError(err.message);
+          }
+        });
       });
-    });
-  }
+    }
 
-  function openVacationForm(parentModal, member, basePath, vacation) {
-    parentModal.close();
-    const editing = Boolean(vacation);
-    const modal = openModal({
-      title: editing ? 'Изменить отпуск' : `Отпуск · ${member.fullName}`,
-      bodyHtml: `
+    function renderForm(vacation) {
+      const editing = Boolean(vacation);
+      modal.body.querySelector('#vacation-panel').innerHTML = `
         <form id="vacation-form" class="modal-form">
-          <div class="field"><label>Начало</label><input name="startDate" type="date" required value="${escapeHtml(vacation?.startDate || '')}" /></div>
-          <div class="field"><label>Конец</label><input name="endDate" type="date" required value="${escapeHtml(vacation?.endDate || '')}" /></div>
+          <p class="hint">${editing ? 'Изменение отпуска' : 'Новый отпуск'} · ${escapeHtml(member.fullName)}</p>
+          ${dateRangeFieldHtml({
+            label: 'Период отпуска',
+            startValue: vacation?.startDate || '',
+            endValue: vacation?.endDate || '',
+            idPrefix: 'vac',
+          })}
           <div class="field">
             <label>Тип</label>
             <select name="type">
@@ -401,33 +411,50 @@ export function renderTeamTab(root, ctx) {
             </select>
           </div>
           <div class="actions">
-            <button type="button" class="btn-ghost" data-close="1">Отмена</button>
+            <button type="button" class="btn-ghost" id="btn-vac-back">Назад к списку</button>
             <button type="submit" class="btn-primary">${editing ? 'Сохранить' : 'Создать'}</button>
           </div>
-        </form>`,
-    });
-    modal.body.querySelector('#vacation-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.target;
-      modal.setError('');
-      const body = {
-        startDate: form.startDate.value,
-        endDate: form.endDate.value,
-        type: form.type.value,
+        </form>`;
+
+      const form = modal.body.querySelector('#vacation-form');
+      bindDateRange(form);
+      modal.body.querySelector('#btn-vac-back').onclick = () => {
+        modal.setError('');
+        renderList();
       };
-      try {
-        const res = editing
-          ? await api(`${basePath}/${vacation.id}`, { method: 'PUT', token, body })
-          : await api(basePath, { method: 'POST', token, body });
-        await ensureOk(res, 'Не удалось сохранить отпуск');
-        modal.close();
-        await reload();
-        onChanged?.();
-      }
-      catch (err) {
-        modal.setError(err.message);
-      }
-    });
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        modal.setError('');
+        const body = {
+          startDate: form.startDate.value,
+          endDate: form.endDate.value,
+          type: form.type.value,
+        };
+        try {
+          const res = editing
+            ? await api(`${basePath}/${vacation.id}`, { method: 'PUT', token, body })
+            : await api(basePath, { method: 'POST', token, body });
+          await ensureOk(res, 'Не удалось сохранить отпуск');
+          const saved = await res.json();
+          if (editing) {
+            working.vacations = working.vacations.map((item) =>
+              (item.id === vacation.id ? saved : item));
+          }
+          else {
+            working.vacations = [...working.vacations, saved];
+          }
+          modal.setError('');
+          renderList();
+          await reload();
+          onChanged?.();
+        }
+        catch (err) {
+          modal.setError(err.message);
+        }
+      });
+    }
+
+    renderList();
   }
 
   reload();

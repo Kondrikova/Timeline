@@ -1,8 +1,10 @@
 import { api } from '../api.js';
 import { escapeHtml, ensureOk } from '../dom.js';
 import { openModal } from '../modal.js';
+import { bindDateRange, dateRangeFieldHtml } from '../date-range.js';
 
 const STATES = ['PLANNED', 'ACTIVE', 'CLOSED'];
+const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
 
 export async function loadSprints(token) {
   const res = await api('/api/v1/sprints', { token });
@@ -40,12 +42,26 @@ export function renderSprintsTab(root, ctx) {
 
   function capacityFor(sprintId) {
     const rows = capacities.filter((item) => item.sprintId === sprintId);
-    if (!rows.length) {
+    const byId = Object.fromEntries(rows.map((row) => [row.disciplineId, row]));
+    const ordered = [...disciplines].sort((a, b) => {
+      const ai = ROLE_ORDER.indexOf(a.code);
+      const bi = ROLE_ORDER.indexOf(b.code);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    if (!ordered.length && !rows.length) {
       return '<span class="cell-empty">пересчитайте план / задайте velocity</span>';
     }
-    return rows.map((row) => {
-      const d = disciplines.find((item) => item.id === row.disciplineId);
-      return `<div class="mono">${escapeHtml(d?.code || '?')}: ${escapeHtml(String(row.capacitySp))} SP`
+    const source = ordered.length
+      ? ordered.map((d) => ({ code: d.code, row: byId[d.id] }))
+      : rows.map((row) => ({
+        code: disciplines.find((item) => item.id === row.disciplineId)?.code || '?',
+        row,
+      }));
+    return source.map(({ code, row }) => {
+      if (!row) {
+        return `<div class="mono">${escapeHtml(code)}: cap 0</div>`;
+      }
+      return `<div class="mono">${escapeHtml(code)}: ${escapeHtml(String(row.capacitySp))} SP`
         + ` · avail ${row.availablePersonDays}д · vac ${row.vacationPersonDays}д</div>`;
     }).join('');
   }
@@ -145,14 +161,12 @@ export function renderSprintsTab(root, ctx) {
             <label for="sprint-name">Название</label>
             <input id="sprint-name" name="name" required value="${escapeHtml(sprint?.name || `Sprint ${nextNumber}`)}" />
           </div>
-          <div class="field">
-            <label for="sprint-start">Начало</label>
-            <input id="sprint-start" name="startDate" type="date" required value="${escapeHtml(sprint?.startDate || '')}" />
-          </div>
-          <div class="field">
-            <label for="sprint-end">Конец</label>
-            <input id="sprint-end" name="endDate" type="date" required value="${escapeHtml(sprint?.endDate || '')}" />
-          </div>
+          ${dateRangeFieldHtml({
+            label: 'Период спринта',
+            startValue: sprint?.startDate || '',
+            endValue: sprint?.endDate || '',
+            idPrefix: 'sprint',
+          })}
           ${editing ? `
             <div class="field">
               <label for="sprint-state">Состояние</label>
@@ -169,9 +183,11 @@ export function renderSprintsTab(root, ctx) {
       `,
     });
 
-    modal.body.querySelector('#sprint-form').addEventListener('submit', async (event) => {
+    const form = modal.body.querySelector('#sprint-form');
+    bindDateRange(form);
+
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const form = event.target;
       modal.setError('');
       try {
         if (editing) {

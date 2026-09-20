@@ -1,16 +1,18 @@
 package project.timeline.bff.board;
 
 import org.springframework.stereotype.Component;
-import project.timeline.bff.projection.Projections;
 import project.timeline.bff.projection.DisciplineProjRepository;
 import project.timeline.bff.projection.EpicProjRepository;
 import project.timeline.bff.projection.LinkProjRepository;
 import project.timeline.bff.projection.PlanProjRepository;
+import project.timeline.bff.projection.Projections;
 import project.timeline.bff.projection.SprintProjRepository;
 import project.timeline.bff.projection.TaskProjRepository;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -22,6 +24,8 @@ import java.util.stream.Collectors;
 
 @Component
 public class BoardAssembler {
+
+	private static final List<String> ROLE_ORDER = List.of("BE", "FE", "QA", "SA");
 
 	private final SprintProjRepository sprints;
 	private final EpicProjRepository epics;
@@ -42,7 +46,11 @@ public class BoardAssembler {
 
 	public BoardDocument assemble(long revision) {
 		Projections.PlanProj plan = plans.findById("plan:current").orElseGet(Projections.PlanProj::new);
-		Map<UUID, String> disciplineCode = disciplines.findAll().stream()
+		List<Projections.DisciplineProj> allDisciplines = disciplines.findAll().stream()
+				.sorted(Comparator.comparingInt(BoardAssembler::roleRank)
+						.thenComparing(d -> d.code, String.CASE_INSENSITIVE_ORDER))
+				.toList();
+		Map<UUID, String> disciplineCode = allDisciplines.stream()
 				.collect(Collectors.toMap(d -> d.id, d -> d.code, (a, b) -> a));
 		Map<UUID, String> taskKey = tasks.findAll().stream()
 				.collect(Collectors.toMap(t -> t.id, t -> t.key, (a, b) -> a));
@@ -59,13 +67,21 @@ public class BoardAssembler {
 			}
 		}
 
+		Map<String, Projections.Capacity> capacityIndex = plan.capacities.stream()
+				.collect(Collectors.toMap(
+						capacity -> capacity.sprintId + "|" + capacity.disciplineId,
+						capacity -> capacity,
+						(a, b) -> a));
+
 		List<BoardDocument.SprintColumn> sprintColumns = sprints.findAllByOrderByNumberAsc().stream()
 				.map(sprint -> new BoardDocument.SprintColumn(
-						sprint.id, sprint.number, sprint.name, sprint.startDate, sprint.endDate,
-						plan.capacities.stream()
-								.filter(capacity -> capacity.sprintId.equals(sprint.id))
-								.map(capacity -> toCapacityCell(capacity, disciplineCode))
-								.toList()))
+						sprint.id,
+						sprint.number,
+						sprint.name,
+						sprint.startDate,
+						sprint.endDate,
+						workingDaysBetween(sprint.startDate, sprint.endDate),
+						capacityForSprint(sprint.id, allDisciplines, capacityIndex, disciplineCode)))
 				.toList();
 
 		Map<UUID, List<Projections.TaskProj>> tasksByEpic = tasks.findAllByOrderByPriorityAscKeyAsc().stream()
@@ -92,6 +108,36 @@ public class BoardAssembler {
 		board.setEpics(epicRows);
 		board.setConflictsSummary(summary);
 		return board;
+	}
+
+	/**
+	 * В шапке спринта всегда все известные роли (FE/BE/QA/SA…): даже при нулевой
+	 * ёмкости строка нужна, иначе на доске «пропадает» незадействованная роль.
+	 */
+	private List<BoardDocument.CapacityCell> capacityForSprint(
+			UUID sprintId,
+			List<Projections.DisciplineProj> allDisciplines,
+			Map<String, Projections.Capacity> capacityIndex,
+			Map<UUID, String> disciplineCode) {
+		List<BoardDocument.CapacityCell> cells = new ArrayList<>();
+		for (Projections.DisciplineProj discipline : allDisciplines) {
+			Projections.Capacity capacity = capacityIndex.get(sprintId + "|" + discipline.id);
+			if (capacity != null) {
+				cells.add(toCapacityCell(capacity, disciplineCode));
+			}
+			else {
+				cells.add(new BoardDocument.CapacityCell(
+						discipline.id,
+						discipline.code,
+						0,
+						0,
+						BigDecimal.ZERO,
+						BigDecimal.ZERO,
+						BigDecimal.ZERO,
+						false));
+			}
+		}
+		return cells;
 	}
 
 	private BoardDocument.CapacityCell toCapacityCell(Projections.Capacity capacity,
@@ -159,6 +205,25 @@ public class BoardAssembler {
 		}
 		return new BoardDocument.LinkCell(link.type, link.hardness, "AFTER",
 				taskKey.getOrDefault(link.fromTaskId, link.fromTaskId.toString()));
+	}
+
+	static int workingDaysBetween(LocalDate from, LocalDate to) {
+		if (from == null || to == null || to.isBefore(from)) {
+			return 0;
+		}
+		int days = 0;
+		for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+			DayOfWeek dow = day.getDayOfWeek();
+			if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+				days++;
+			}
+		}
+		return days;
+	}
+
+	private static int roleRank(Projections.DisciplineProj discipline) {
+		int index = ROLE_ORDER.indexOf(discipline.code);
+		return index < 0 ? ROLE_ORDER.size() : index;
 	}
 
 	private static final UUID NIL_EPIC = UUID.fromString("00000000-0000-0000-0000-000000000000");
