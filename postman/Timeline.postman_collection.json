@@ -12,6 +12,7 @@
     { "key": "adminToken", "value": "" },
     { "key": "memberToken", "value": "" },
     { "key": "disciplineId", "value": "" },
+    { "key": "petrUserId", "value": "22222222-2222-2222-2222-222222222222" },
     { "key": "memberId", "value": "" },
     { "key": "sprint1Id", "value": "" },
     { "key": "sprint2Id", "value": "" },
@@ -95,14 +96,20 @@
       "name": "0. Настройка команды",
       "item": [
         {
-          "name": "Создать дисциплину BACKEND",
+          "name": "Список ролей FE/BE/QA/SA",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('201', () => pm.response.to.have.status(201));",
-                  "pm.collectionVariables.set('disciplineId', pm.response.json().id);"
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const roles = pm.response.json();",
+                  "pm.test('есть BE/FE/QA/SA', () => {",
+                  "  const codes = roles.map(r => r.code).sort();",
+                  "  pm.expect(codes).to.include.members(['BE','FE','QA','SA']);",
+                  "});",
+                  "const be = roles.find(r => r.code === 'BE');",
+                  "pm.collectionVariables.set('disciplineId', be.id);"
                 ]
               }
             }
@@ -112,23 +119,43 @@
               "type": "bearer",
               "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
             },
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"code\": \"BACKEND\",\n  \"name\": \"Разработка\",\n  \"velocitySpPerSprint\": 20\n}"
-            },
+            "method": "GET",
             "url": "{{baseUrl}}/api/v1/disciplines"
           }
         },
         {
-          "name": "Добавить сотрудника Петра",
+          "name": "Каталог пользователей Keycloak",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const users = pm.response.json();",
+                  "pm.test('есть petr.dev', () => pm.expect(users.some(u => u.username === 'petr.dev')).to.be.true);",
+                  "const petr = users.find(u => u.username === 'petr.dev');",
+                  "if (petr) { pm.collectionVariables.set('petrUserId', petr.userId); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/team/directory"
+          }
+        },
+        {
+          "name": "Админ назначает роль Петру из каталога",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
                   "pm.collectionVariables.set('memberId', pm.response.json().id);"
                 ]
               }
@@ -139,13 +166,37 @@
               "type": "bearer",
               "bearer": [{ "key": "token", "value": "{{adminToken}}" }]
             },
-            "method": "POST",
+            "method": "PUT",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"userId\": \"22222222-2222-2222-2222-222222222222\",\n  \"fullName\": \"Пётр\",\n  \"disciplineId\": \"{{disciplineId}}\",\n  \"lead\": false,\n  \"activeFrom\": \"2026-01-01\"\n}"
+              "raw": "{\n  \"disciplineId\": \"{{disciplineId}}\",\n  \"lead\": false\n}"
             },
-            "url": "{{baseUrl}}/api/v1/team/members"
+            "url": "{{baseUrl}}/api/v1/team/directory/{{petrUserId}}/discipline"
+          }
+        },
+        {
+          "name": "Пётр указывает себе роль",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{memberToken}}" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"disciplineId\": \"{{disciplineId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/team/me/discipline"
           }
         },
         {

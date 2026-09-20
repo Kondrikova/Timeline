@@ -72,6 +72,14 @@
       "email": "olga.qa@timeline.local",
       "credentials": [{ "type": "password", "value": "member123", "temporary": false }],
       "realmRoles": ["MEMBER"]
+    },
+    {
+      "username": "service-account-timeline-backend",
+      "enabled": true,
+      "serviceAccountClientId": "timeline-backend",
+      "clientRoles": {
+        "realm-management": ["view-users", "query-users", "view-realm"]
+      }
     }
   ]
 }

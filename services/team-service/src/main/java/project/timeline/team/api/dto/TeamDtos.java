@@ -91,6 +91,26 @@ public final class TeamDtos {
 		}
 	}
 
+	/** Текущий пользователь указывает себе профессиональную роль (FE/BE/QA/SA). */
+	public record SelfDisciplineRequest(@NotNull UUID disciplineId) {
+	}
+
+	/** Админ назначает роль пользователю из каталога Keycloak. */
+	public record DirectoryAssignRequest(@NotNull UUID disciplineId, boolean lead) {
+	}
+
+	public record DirectoryUserResponse(
+			String userId,
+			String username,
+			String fullName,
+			String email,
+			boolean inTeam,
+			UUID memberId,
+			UUID disciplineId,
+			String disciplineCode,
+			boolean lead) {
+	}
+
 	private TeamDtos() {
 	}
 }

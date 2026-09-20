@@ -513,6 +513,22 @@ body.modal-open { overflow: hidden; }
 
 .modal-error { padding: 0 1.1rem 1rem; }
 
+.panel-block {
+  margin: 1.25rem 0 1.75rem;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin-top: 0.65rem;
+}
+
+.inline-form select {
+  min-width: 12rem;
+}
+
 @keyframes rise {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: none; }

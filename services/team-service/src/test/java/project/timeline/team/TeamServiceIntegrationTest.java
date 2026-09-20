@@ -137,6 +137,26 @@ class TeamServiceIntegrationTest extends AbstractPostgresTest {
 		assertThat(payloads.get(1)).contains("15.00");
 	}
 
+	@Test
+	@DisplayName("сотрудник сам указывает профессиональную роль")
+	void memberAssignsOwnDiscipline() {
+		authenticate(ADMIN_USER, "ADMIN");
+		Discipline fe = disciplineService.create("FE-" + UUID.randomUUID(), "Frontend", new BigDecimal("20.00"));
+
+		authenticate(MEMBER_USER, "MEMBER", "Пётр", "Разработчик");
+		TeamMember created = teamService.assignMyDiscipline(fe.getId());
+
+		assertThat(created.getUserId()).isEqualTo(MEMBER_USER);
+		assertThat(created.getFullName()).isEqualTo("Пётр Разработчик");
+		assertThat(created.getDiscipline().getId()).isEqualTo(fe.getId());
+
+		Discipline be = disciplineService.create("BE-" + UUID.randomUUID(), "Backend", new BigDecimal("22.00"));
+		authenticate(MEMBER_USER, "MEMBER", "Пётр", "Разработчик");
+		TeamMember updated = teamService.assignMyDiscipline(be.getId());
+		assertThat(updated.getId()).isEqualTo(created.getId());
+		assertThat(updated.getDiscipline().getId()).isEqualTo(be.getId());
+	}
+
 	@Transactional
 	TeamMember newMember(String name, String userId) {
 		Discipline discipline = disciplineService.create(
@@ -153,11 +173,22 @@ class TeamServiceIntegrationTest extends AbstractPostgresTest {
 	}
 
 	private void authenticate(String userId, String role) {
-		Jwt jwt = Jwt.withTokenValue("test-token")
+		authenticate(userId, role, null, null);
+	}
+
+	private void authenticate(String userId, String role, String givenName, String familyName) {
+		var builder = Jwt.withTokenValue("test-token")
 				.header("alg", "none")
 				.subject(userId)
 				.claim("realm_access", java.util.Map.of("roles", List.of(role)))
-				.build();
+				.claim("preferred_username", userId);
+		if (givenName != null) {
+			builder.claim("given_name", givenName);
+		}
+		if (familyName != null) {
+			builder.claim("family_name", familyName);
+		}
+		Jwt jwt = builder.build();
 		SecurityContextHolder.getContext().setAuthentication(
 				new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_" + role)), userId));
 	}

@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import project.timeline.team.api.dto.TeamDtos.MemberResponse;
+import project.timeline.team.api.dto.TeamDtos.SelfDisciplineRequest;
 import project.timeline.team.api.dto.TeamDtos.VacationRequest;
 import project.timeline.team.api.dto.TeamDtos.VacationResponse;
 import project.timeline.team.service.TeamService;
@@ -37,6 +38,15 @@ public class MyVacationController {
 	@GetMapping
 	public MemberResponse me() {
 		return MemberResponse.of(service.requireCurrent());
+	}
+
+	/**
+	 * Пользователь сам указывает профессиональную роль (FE / BE / QA / SA).
+	 * При первом выборе создаётся профиль в команде.
+	 */
+	@PutMapping("/discipline")
+	public MemberResponse assignDiscipline(@Valid @RequestBody SelfDisciplineRequest request) {
+		return MemberResponse.of(service.assignMyDiscipline(request.disciplineId()));
 	}
 
 	@PostMapping("/vacations")
