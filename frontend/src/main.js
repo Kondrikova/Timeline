@@ -4,6 +4,7 @@ import { closeModal } from './modal.js';
 import { renderPlanningTab } from './views/planning.js';
 import { renderBacklogTab } from './views/backlog.js';
 import { renderSprintsTab } from './views/sprints.js';
+import { renderTeamTab } from './views/team.js';
 
 const app = document.getElementById('app');
 
@@ -11,6 +12,7 @@ const TABS = {
   planning: 'Планирование',
   backlog: 'Задачи и эпики',
   sprints: 'Спринты',
+  team: 'Команда и отпуска',
 };
 
 let state = {
@@ -89,7 +91,7 @@ function resetSessionState() {
 }
 
 async function enterApp() {
-  if (!isAdmin() && state.tab !== 'planning') {
+  if (!isAdmin() && state.tab !== 'planning' && state.tab !== 'team') {
     state.tab = 'planning';
   }
   renderApp();
@@ -144,7 +146,7 @@ function renderApp() {
   const admin = isAdmin();
   const tabs = admin
     ? Object.entries(TABS)
-    : [['planning', TABS.planning]];
+    : [['planning', TABS.planning], ['team', TABS.team]];
 
   app.innerHTML = `
     <div class="shell">
@@ -232,6 +234,16 @@ function mountTab() {
     activeView = renderSprintsTab(root, {
       token: token(),
       isAdmin: true,
+      onChanged: () => refreshBoard({ force: true }).catch(() => {}),
+      showError,
+    });
+    return;
+  }
+
+  if (state.tab === 'team') {
+    activeView = renderTeamTab(root, {
+      token: token(),
+      isAdmin: isAdmin(),
       onChanged: () => refreshBoard({ force: true }).catch(() => {}),
       showError,
     });

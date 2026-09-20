@@ -13,11 +13,23 @@ export async function loadSprints(token) {
 export function renderSprintsTab(root, ctx) {
   const { token, isAdmin, onChanged, showError } = ctx;
   let sprints = [];
+  let capacities = [];
+  let disciplines = [];
 
   async function reload() {
     root.innerHTML = '<p class="meta">Загрузка спринтов…</p>';
     try {
-      sprints = await loadSprints(token);
+      const [sRes, cRes, dRes] = await Promise.all([
+        api('/api/v1/sprints', { token }),
+        api('/api/v1/plan/capacity', { token }),
+        api('/api/v1/disciplines', { token }),
+      ]);
+      await ensureOk(sRes, 'Не удалось загрузить спринты');
+      await ensureOk(cRes, 'Не удалось загрузить ёмкость');
+      await ensureOk(dRes, 'Не удалось загрузить роли');
+      sprints = await sRes.json();
+      capacities = await cRes.json();
+      disciplines = await dRes.json();
       paint();
     }
     catch (err) {
@@ -26,15 +38,30 @@ export function renderSprintsTab(root, ctx) {
     }
   }
 
+  function capacityFor(sprintId) {
+    const rows = capacities.filter((item) => item.sprintId === sprintId);
+    if (!rows.length) {
+      return '<span class="cell-empty">пересчитайте план / задайте velocity</span>';
+    }
+    return rows.map((row) => {
+      const d = disciplines.find((item) => item.id === row.disciplineId);
+      return `<div class="mono">${escapeHtml(d?.code || '?')}: ${escapeHtml(String(row.capacitySp))} SP`
+        + ` · avail ${row.availablePersonDays}д · vac ${row.vacationPersonDays}д</div>`;
+    }).join('');
+  }
+
   function paint() {
     root.innerHTML = `
       <div class="admin-toolbar">
         <div>
           <h2 class="section-title">Спринты</h2>
-          <p class="hint">Создание, перенос дат и смена состояния. Удаление запускает сагу.</p>
+          <p class="hint">Ёмкость считается из velocity роли и доступности (с учётом отпусков), не вводится вручную.</p>
         </div>
         <div class="actions">
-          ${isAdmin ? `<button type="button" class="btn-primary" id="btn-sprint">Новый спринт</button>` : ''}
+          ${isAdmin ? `
+            <button type="button" class="btn-primary" id="btn-sprint">Новый спринт</button>
+            <button type="button" class="btn-ghost" id="btn-recalc">Пересчитать ёмкость</button>
+          ` : ''}
           <button type="button" class="btn-ghost" id="btn-reload-sprints">Обновить</button>
         </div>
       </div>
@@ -42,17 +69,17 @@ export function renderSprintsTab(root, ctx) {
         <table class="data-table">
           <thead>
             <tr>
-              <th>#</th><th>Название</th><th>Период</th><th>Состояние</th><th>Раб. дни</th><th></th>
+              <th>#</th><th>Название</th><th>Период</th><th>Состояние</th><th>Ёмкость по ролям</th><th></th>
             </tr>
           </thead>
           <tbody>
             ${sprints.length ? sprints.map((sprint) => `
               <tr>
                 <td class="mono">${sprint.number}</td>
-                <td>${escapeHtml(sprint.name)}</td>
-                <td>${escapeHtml(sprint.startDate)} — ${escapeHtml(sprint.endDate)}</td>
+                <td>${escapeHtml(sprint.name)}<div class="status">${sprint.workingDays} раб. дн.</div></td>
+                <td class="mono">${escapeHtml(sprint.startDate)} — ${escapeHtml(sprint.endDate)}</td>
                 <td><span class="status">${escapeHtml(sprint.state)}</span></td>
-                <td>${sprint.workingDays}</td>
+                <td>${capacityFor(sprint.id)}</td>
                 <td class="row-actions">
                   ${isAdmin && sprint.state !== 'DELETING' ? `
                     <button type="button" class="linkish" data-edit-sprint="${sprint.id}">Изменить</button>
@@ -67,10 +94,20 @@ export function renderSprintsTab(root, ctx) {
 
     root.querySelector('#btn-reload-sprints')?.addEventListener('click', () => reload());
     root.querySelector('#btn-sprint')?.addEventListener('click', () => openSprintModal());
+    root.querySelector('#btn-recalc')?.addEventListener('click', async () => {
+      try {
+        const res = await api('/api/v1/plan/recalculate', { method: 'POST', token });
+        await ensureOk(res, 'Не удалось пересчитать');
+        await reload();
+        onChanged?.();
+      }
+      catch (err) {
+        showError?.(err);
+      }
+    });
     root.querySelectorAll('[data-edit-sprint]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const sprint = sprints.find((item) => item.id === btn.dataset.editSprint);
-        openSprintModal(sprint);
+        openSprintModal(sprints.find((item) => item.id === btn.dataset.editSprint));
       });
     });
     root.querySelectorAll('[data-delete-sprint]').forEach((btn) => {

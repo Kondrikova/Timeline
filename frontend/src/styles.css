@@ -398,6 +398,28 @@ table.board {
 
 .linkish:hover { transform: none; }
 
+.estimate-row {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.estimate-row .check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.95rem;
+}
+
+.estimate-row input[type="number"] {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+}
+
 .field-wide { grid-column: 1 / -1; }
 
 .preview {
