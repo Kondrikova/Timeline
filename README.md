@@ -36,11 +36,12 @@ deploy                docker-compose, observability, Keycloak, Postgres
 
 ```bash
 cd deploy
-docker compose up --build
+docker compose up --build --force-recreate
 ```
 
-Без observability-оверлея OTEL-агент **выключен** (`OTEL_JAVAAGENT_ENABLED=false`),
-чтобы в логах не было `otel-collector: Name does not resolve`.
+Без observability-оверлея OTEL-агент **выключен** (`OTEL_JAVAAGENT_ENABLED=false`;
+entrypoint не вешает `-javaagent`), чтобы в логах не было
+`otel-collector: Name does not resolve`.
 
 С наблюдаемостью (Prometheus, Grafana, Tempo, OTel-агент):
 
@@ -49,8 +50,13 @@ cd deploy
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build --force-recreate
 ```
 
-Если раньше поднимали со стеком наблюдаемости, а потом без него — пересоздайте
-сервисы (`--force-recreate`), иначе в контейнерах останется старый `JAVA_TOOL_OPTIONS`.
+Если в логах снова сыпется `UnknownHostException: otel-collector` — вы на базовом
+compose, но контейнеры ещё со старым агентом. Пересоберите и пересоздайте:
+
+```bash
+cd deploy
+docker compose up -d --build --force-recreate
+```
 
 | Компонент | Адрес |
 |---|---|
