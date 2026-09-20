@@ -107,13 +107,24 @@ public class Task {
 	/**
 	 * Полностью заменяет набор задействованных ролей: роль, которой нет в новом
 	 * наборе, больше не участвует в задаче.
+	 *
+	 * <p>Обновляем существующие строки и добавляем только новые: полная замена
+	 * через {@code clear()+addAll()} с новым id даёт гонку INSERT/DELETE и
+	 * нарушает UNIQUE (task_id, discipline_id).
 	 */
 	public void replaceEstimates(Map<UUID, BigDecimal> newEstimates) {
-		List<TaskEstimate> replacement = newEstimates.entrySet().stream()
-				.map(entry -> new TaskEstimate(this, entry.getKey(), entry.getValue()))
-				.toList();
-		estimates.clear();
-		estimates.addAll(replacement);
+		estimates.removeIf(estimate -> !newEstimates.containsKey(estimate.getDisciplineId()));
+		Map<UUID, TaskEstimate> byDiscipline = estimates.stream()
+				.collect(Collectors.toMap(TaskEstimate::getDisciplineId, estimate -> estimate, (a, b) -> a));
+		for (Map.Entry<UUID, BigDecimal> entry : newEstimates.entrySet()) {
+			TaskEstimate existing = byDiscipline.get(entry.getKey());
+			if (existing != null) {
+				existing.changeEstimateSp(entry.getValue());
+			}
+			else {
+				estimates.add(new TaskEstimate(this, entry.getKey(), entry.getValue()));
+			}
+		}
 	}
 
 	public void markDeleting() {

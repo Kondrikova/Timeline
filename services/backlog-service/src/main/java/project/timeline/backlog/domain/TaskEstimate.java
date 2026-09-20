@@ -50,6 +50,13 @@ public class TaskEstimate {
 		this.estimateSp = estimateSp;
 	}
 
+	void changeEstimateSp(BigDecimal estimateSp) {
+		if (estimateSp != null && estimateSp.signum() < 0) {
+			throw new IllegalArgumentException("Оценка в SP не может быть отрицательной");
+		}
+		this.estimateSp = estimateSp;
+	}
+
 	public UUID getDisciplineId() {
 		return disciplineId;
 	}
