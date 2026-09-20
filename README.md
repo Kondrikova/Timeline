@@ -18,6 +18,9 @@ libs/common-outbox    transactional outbox, идемпотентный потр�
 libs/common-web       ProblemDetail, корреляция запросов, ресурс-сервер
 services/api-gateway  единая точка входа: JWT, маршруты, rate limit, CORS
 services/team-service сотрудники, дисциплины с velocity, отпуска
+services/schedule-service спринты, производственный календарь, сага удаления
+services/backlog-service  эпики, задачи, оценки в SP, связи трёх типов
+services/planning-service аллокации, ёмкость, каскад, конфликты
 deploy                docker-compose, realm Keycloak, инициализация Postgres
 ```
 
@@ -105,10 +108,10 @@ Testcontainers и проверяют миграции вместе с огран
 |---|---|
 | Каркас, окружение, шлюз | готово |
 | `team-service` | готово |
-| `schedule-service` | не начат |
-| `backlog-service` | не начат |
-| `planning-service` | не начат |
+| `schedule-service` | готово |
+| `backlog-service` | готово |
+| `planning-service` | готово |
 | `timeline-bff` | не начат |
-| Саги удаления, DLQ | не начаты |
+| Саги удаления задачи, DLQ | не начаты (сага удаления спринта есть) |
 | Наблюдаемость | базовая: метрики и health |
 | Postman, k6, фронтенд | не начаты |
