@@ -9,6 +9,7 @@
 - [Архитектура решения](docs/architecture.md) — декомпозиция на микросервисы,
   диаграммы C4, модель данных, межсервисное взаимодействие, консистентность,
   безопасность, наблюдаемость, план реализации и реестр архитектурных решений.
+- [Нагрузочное тестирование](docs/load-testing.md) — SLO и шаблон результатов k6.
 
 ## Состав репозитория
 
@@ -22,7 +23,10 @@ services/schedule-service спринты, производственный ка�
 services/backlog-service  эпики, задачи, оценки в SP, связи трёх типов
 services/planning-service аллокации, ёмкость, каскад, конфликты
 services/timeline-bff     проекция доски (MongoDB) и SSE
-deploy                docker-compose, realm Keycloak, инициализация Postgres
+frontend              SPA доски (nginx)
+k6                    нагрузочные сценарии
+postman               коллекция сценариев защиты
+deploy                docker-compose, observability, Keycloak, Postgres
 ```
 
 ## Запуск
@@ -35,14 +39,20 @@ cd deploy
 docker compose up --build
 ```
 
-Поднимаются Postgres, Kafka (KRaft), Redis, Keycloak с импортом realm, а также
-`team-service` и `api-gateway`.
+С наблюдаемостью (Prometheus, Grafana, Tempo, OTel-агент):
+
+```bash
+cd deploy
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+```
 
 | Компонент | Адрес |
 |---|---|
+| Frontend | http://localhost/ |
 | API Gateway | http://localhost:8080 |
-| team-service | http://localhost:8082 |
 | Keycloak | http://localhost:8090 (admin/admin) |
+| Grafana | http://localhost:3000 (admin/admin) |
+| Prometheus | http://localhost:9090 |
 
 Преднастроенные пользователи realm `timeline`:
 
@@ -56,6 +66,8 @@ docker compose up --build
 
 Коллекция Postman: [`postman/Timeline.postman_collection.json`](postman/Timeline.postman_collection.json)
 (папки по сценариям 0–5 + саги, OIDC password grant, тесты на шагах).
+
+Нагрузка k6: [`k6/`](k6/) — см. `k6/README.md`.
 
 Получить токен:
 
@@ -117,6 +129,12 @@ curl -N http://localhost:8080/api/v1/timeline/stream \
 Testcontainers и проверяют миграции вместе с ограничениями уровня СУБД; без
 запущенного Docker они пропускаются, а не падают.
 
+Фронтенд локально:
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
 ## Статус реализации
 
 | Этап | Состояние |
@@ -128,6 +146,7 @@ Testcontainers и проверяют миграции вместе с огран
 | `planning-service` | готово |
 | `timeline-bff` | готово |
 | Саги удаления (спринт и задача), retry/DLT | готово |
-| Наблюдаемость | базовая: метрики и health |
-| Postman | готово (`postman/Timeline.postman_collection.json`) |
-| k6, фронтенд | не начаты |
+| Наблюдаемость (Prometheus, Grafana, Tempo, OTel) | готово |
+| Postman | готово |
+| k6 | готово (`k6/`, `docs/load-testing.md`) |
+| Фронтенд | готово (`frontend/`) |

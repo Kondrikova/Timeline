@@ -15,7 +15,12 @@ RUN cp services/${SERVICE}/build/libs/*.jar /src/app.jar
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-RUN addgroup -S timeline && adduser -S timeline -G timeline
+# Агент подключается через JAVA_TOOL_OPTIONS только в observability-оверлее —
+# без него сервисы стартуют как обычно.
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.12.0/opentelemetry-javaagent.jar \
+    /otel/opentelemetry-javaagent.jar
+RUN addgroup -S timeline && adduser -S timeline -G timeline \
+    && chown -R timeline:timeline /otel
 COPY --from=build /src/app.jar app.jar
 USER timeline
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]

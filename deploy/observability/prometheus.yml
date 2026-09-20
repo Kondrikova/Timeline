@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: team-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["team-service:8082"]
+        labels: { application: team-service }
+
+  - job_name: backlog-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backlog-service:8083"]
+        labels: { application: backlog-service }
+
+  - job_name: schedule-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["schedule-service:8084"]
+        labels: { application: schedule-service }
+
+  - job_name: planning-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["planning-service:8085"]
+        labels: { application: planning-service }
+
+  - job_name: timeline-bff
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["timeline-bff:8081"]
+        labels: { application: timeline-bff }
+
+  - job_name: api-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["api-gateway:8080"]
+        labels: { application: api-gateway }
