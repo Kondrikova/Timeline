@@ -22,6 +22,16 @@ export function clearAuth() {
   localStorage.removeItem(storageKey);
 }
 
+export function rolesFromToken(accessToken) {
+  try {
+    const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.realm_access?.roles || [];
+  }
+  catch {
+    return [];
+  }
+}
+
 export async function login(username, password) {
   const body = new URLSearchParams({
     grant_type: 'password',
@@ -46,12 +56,13 @@ export async function login(username, password) {
     refreshToken: token.refresh_token,
     expiresAt: Date.now() + token.expires_in * 1000,
     username,
+    roles: rolesFromToken(token.access_token),
   };
   saveAuth(auth);
   return auth;
 }
 
-export async function api(path, { method = 'GET', body, token, etag } = {}) {
+export async function api(path, { method = 'GET', body, token, etag, signal } = {}) {
   const headers = {
     Authorization: `Bearer ${token}`,
   };
@@ -61,10 +72,10 @@ export async function api(path, { method = 'GET', body, token, etag } = {}) {
   if (etag) {
     headers['If-None-Match'] = etag;
   }
-  const res = await fetch(`${API_BASE}${path}`, {
+  return fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
-  return res;
 }
