@@ -8,7 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import project.timeline.common.web.DomainException;
 
 import java.time.Instant;
@@ -19,10 +19,11 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Каталог пользователей через Admin API Keycloak (client credentials).
+ * Каталог пользователей через Admin API Keycloak.
  *
- * <p>Сервисный клиент {@code timeline-backend} должен иметь роли
- * {@code view-users} / {@code query-users} в {@code realm-management}.
+ * <p>Авторизация — password grant клиента {@code admin-cli} в master-realm:
+ * так каталог работает без ручной выдачи ролей сервисному аккаунту и без
+ * повторного импорта realm (который Keycloak делает только при первом старте).
  */
 @Component
 public class KeycloakDirectoryClient {
@@ -31,26 +32,36 @@ public class KeycloakDirectoryClient {
 
 	private final RestClient restClient;
 	private final String realm;
-	private final String clientId;
-	private final String clientSecret;
+	private final String adminRealm;
+	private final String adminClientId;
+	private final String adminUsername;
+	private final String adminPassword;
 	private final AtomicReference<CachedToken> tokenCache = new AtomicReference<>();
 
 	public KeycloakDirectoryClient(
 			RestClient.Builder builder,
 			@Value("${timeline.keycloak.server-url:http://localhost:8090}") String serverUrl,
 			@Value("${timeline.keycloak.realm:timeline}") String realm,
-			@Value("${timeline.keycloak.client-id:timeline-backend}") String clientId,
-			@Value("${timeline.keycloak.client-secret:timeline-backend-secret}") String clientSecret) {
+			@Value("${timeline.keycloak.admin-realm:master}") String adminRealm,
+			@Value("${timeline.keycloak.admin-client-id:admin-cli}") String adminClientId,
+			@Value("${timeline.keycloak.admin-username:admin}") String adminUsername,
+			@Value("${timeline.keycloak.admin-password:admin}") String adminPassword) {
 		this.restClient = builder.baseUrl(trimTrailingSlash(serverUrl)).build();
 		this.realm = realm;
-		this.clientId = clientId;
-		this.clientSecret = clientSecret;
+		this.adminRealm = adminRealm;
+		this.adminClientId = adminClientId;
+		this.adminUsername = adminUsername;
+		this.adminPassword = adminPassword;
 	}
 
 	public List<KeycloakUser> listUsers() {
 		try {
 			KeycloakUserRepresentation[] body = restClient.get()
-					.uri("/admin/realms/{realm}/users?max={max}&enabled=true", realm, 500)
+					.uri(uriBuilder -> uriBuilder
+							.path("/admin/realms/{realm}/users")
+							.queryParam("max", 500)
+							.queryParam("enabled", true)
+							.build(realm))
 					.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken())
 					.retrieve()
 					.body(KeycloakUserRepresentation[].class);
@@ -63,10 +74,13 @@ public class KeycloakDirectoryClient {
 					.map(KeycloakUserRepresentation::toUser)
 					.toList();
 		}
-		catch (RestClientException e) {
+		catch (RestClientResponseException e) {
+			log.warn("Keycloak users HTTP {}: {}", e.getStatusCode().value(), e.getResponseBodyAsString());
+			throw directoryUnavailable(e);
+		}
+		catch (RuntimeException e) {
 			log.warn("Не удалось получить пользователей Keycloak: {}", e.getMessage());
-			throw DomainException.badRequest("KEYCLOAK_DIRECTORY_UNAVAILABLE",
-					"Каталог пользователей Keycloak недоступен");
+			throw directoryUnavailable(e);
 		}
 	}
 
@@ -82,7 +96,12 @@ public class KeycloakDirectoryClient {
 			}
 			return Optional.of(body.toUser());
 		}
-		catch (RestClientException e) {
+		catch (RestClientResponseException e) {
+			log.warn("Пользователь Keycloak {} HTTP {}: {}", userId, e.getStatusCode().value(),
+					e.getResponseBodyAsString());
+			return Optional.empty();
+		}
+		catch (RuntimeException e) {
 			log.warn("Пользователь Keycloak {} не найден: {}", userId, e.getMessage());
 			return Optional.empty();
 		}
@@ -95,31 +114,46 @@ public class KeycloakDirectoryClient {
 		}
 		try {
 			var form = new LinkedMultiValueMap<String, String>();
-			form.add("grant_type", "client_credentials");
-			form.add("client_id", clientId);
-			form.add("client_secret", clientSecret);
+			form.add("grant_type", "password");
+			form.add("client_id", adminClientId);
+			form.add("username", adminUsername);
+			form.add("password", adminPassword);
 
 			@SuppressWarnings("unchecked")
 			Map<String, Object> token = restClient.post()
-					.uri("/realms/{realm}/protocol/openid-connect/token", realm)
+					.uri("/realms/{realm}/protocol/openid-connect/token", adminRealm)
 					.contentType(MediaType.APPLICATION_FORM_URLENCODED)
 					.body(form)
 					.retrieve()
 					.body(Map.class);
 			if (token == null || token.get("access_token") == null) {
 				throw DomainException.badRequest("KEYCLOAK_TOKEN_FAILED",
-						"Не удалось получить токен сервисного клиента Keycloak");
+						"Не удалось получить токен администратора Keycloak");
 			}
 			long expiresIn = token.get("expires_in") instanceof Number n ? n.longValue() : 60L;
 			String value = String.valueOf(token.get("access_token"));
 			tokenCache.set(new CachedToken(value, Instant.now().plusSeconds(Math.max(30, expiresIn))));
 			return value;
 		}
-		catch (RestClientException e) {
-			log.warn("Ошибка client_credentials Keycloak: {}", e.getMessage());
-			throw DomainException.badRequest("KEYCLOAK_TOKEN_FAILED",
-					"Не удалось получить токен сервисного клиента Keycloak");
+		catch (DomainException e) {
+			throw e;
 		}
+		catch (RestClientResponseException e) {
+			log.warn("Ошибка admin token Keycloak HTTP {}: {}", e.getStatusCode().value(),
+					e.getResponseBodyAsString());
+			throw DomainException.badRequest("KEYCLOAK_TOKEN_FAILED",
+					"Не удалось получить токен администратора Keycloak");
+		}
+		catch (RuntimeException e) {
+			log.warn("Ошибка admin token Keycloak: {}", e.getMessage());
+			throw DomainException.badRequest("KEYCLOAK_TOKEN_FAILED",
+					"Не удалось получить токен администратора Keycloak");
+		}
+	}
+
+	private static DomainException directoryUnavailable(Throwable cause) {
+		return DomainException.badRequest("KEYCLOAK_DIRECTORY_UNAVAILABLE",
+				"Каталог пользователей Keycloak недоступен");
 	}
 
 	private static boolean isServiceAccount(KeycloakUserRepresentation user) {
@@ -140,9 +174,6 @@ public class KeycloakDirectoryClient {
 	private record CachedToken(String value, Instant expiresAt) {
 	}
 
-	/**
-	 * Подмножество UserRepresentation Admin API.
-	 */
 	private record KeycloakUserRepresentation(
 			String id,
 			String username,
