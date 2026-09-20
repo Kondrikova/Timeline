@@ -39,12 +39,18 @@ cd deploy
 docker compose up --build
 ```
 
+Без observability-оверлея OTEL-агент **выключен** (`OTEL_JAVAAGENT_ENABLED=false`),
+чтобы в логах не было `otel-collector: Name does not resolve`.
+
 С наблюдаемостью (Prometheus, Grafana, Tempo, OTel-агент):
 
 ```bash
 cd deploy
-docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build --force-recreate
 ```
+
+Если раньше поднимали со стеком наблюдаемости, а потом без него — пересоздайте
+сервисы (`--force-recreate`), иначе в контейнерах останется старый `JAVA_TOOL_OPTIONS`.
 
 | Компонент | Адрес |
 |---|---|

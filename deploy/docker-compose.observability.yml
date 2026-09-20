@@ -7,11 +7,12 @@ name: timeline
 # Prometheus: http://localhost:9090
 # Tempo: http://localhost:3200
 #
-# depends_on сервисов намеренно не переопределяется — иначе сотрётся ожидание
-# Postgres/Kafka/Keycloak из базового compose.
+# depends_on сервисов намеренно дополняется, а не заменяется целиком —
+# иначе сотрётся ожидание Postgres/Kafka/Keycloak из базового compose.
 
 x-otel: &otel-env
   JAVA_TOOL_OPTIONS: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  OTEL_JAVAAGENT_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_METRICS_EXPORTER: none
@@ -65,28 +66,46 @@ services:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: team-service
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   backlog-service:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: backlog-service
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   schedule-service:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: schedule-service
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   planning-service:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: planning-service
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   timeline-bff:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: timeline-bff
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   api-gateway:
     environment:
       <<: *otel-env
       OTEL_SERVICE_NAME: api-gateway
+    depends_on:
+      otel-collector:
+        condition: service_started
