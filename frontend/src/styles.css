@@ -378,10 +378,18 @@ table.board {
 .mono { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: flex-end;
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.row-actions .linkish {
+  display: inline-block;
+  margin-left: 0.45rem;
+}
+
+.row-actions .linkish:first-child {
+  margin-left: 0;
 }
 
 .linkish {

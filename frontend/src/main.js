@@ -279,7 +279,17 @@ async function refreshBoard({ force = false } = {}) {
       throw new Error('Сессия истекла');
     }
     if (!res.ok) {
-      throw new Error(`Доска недоступна (${res.status})`);
+      let detail = '';
+      try {
+        const body = await res.json();
+        detail = body.detail || body.title || '';
+      }
+      catch {
+        /* ignore */
+      }
+      throw new Error(detail
+        ? `Доска недоступна (${res.status}): ${detail}`
+        : `Доска недоступна (${res.status})`);
     }
     state.etag = res.headers.get('ETag');
     state.board = await res.json();
