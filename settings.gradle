@@ -6,3 +6,6 @@ include 'libs:common-web'
 
 include 'services:api-gateway'
 include 'services:team-service'
+include 'services:schedule-service'
+include 'services:backlog-service'
+include 'services:planning-service'
