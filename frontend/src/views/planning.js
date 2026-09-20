@@ -7,9 +7,11 @@ const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
 const CONFLICT_LABELS = {
   CAPACITY_OVERFLOW: 'Перегруз ёмкости',
   MISSING_ESTIMATE: 'Нет оценки',
-  DEPENDENCY_VIOLATION: 'Нарушение зависимости',
-  SIMULTANEOUS_SPLIT: 'Разрыв совместных задач',
-  OVERALLOCATION: 'Переаллокация',
+  SEQUENCE_VIOLATION: 'Нарушение последовательности',
+  SIMULTANEITY_VIOLATION: 'Нарушение совместности',
+  BLOCKED_TASK: 'Заблокированная задача',
+  OVER_ALLOCATED_TASK: 'Сверх оценки',
+  UNPLANNED_TASK: 'Не в плане',
 };
 
 export function renderPlanningTab(root, ctx) {
