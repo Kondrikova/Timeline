@@ -503,13 +503,19 @@ body.modal-open { overflow: hidden; }
 
 .modal {
   position: relative;
-  width: min(520px, 100%);
-  max-height: min(90vh, 760px);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(88vh, 720px);
+  overflow: hidden;
   background: var(--paper);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   animation: rise 0.25s ease both;
+}
+
+.modal.modal-wide {
+  width: min(720px, 100%);
 }
 
 .modal-header {
@@ -517,7 +523,9 @@ body.modal-open { overflow: hidden; }
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 1.1rem 0.5rem;
+  padding: 1rem 1.1rem 0.65rem;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
 }
 
 .modal-header h2 {
@@ -534,7 +542,13 @@ body.modal-open { overflow: hidden; }
   padding: 0.2rem 0.45rem;
 }
 
-.modal-body { padding: 0.5rem 1.1rem 1.1rem; }
+.modal-body {
+  padding: 0.85rem 1.1rem 1.1rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 
 .modal-form {
   display: grid;
@@ -551,7 +565,50 @@ body.modal-open { overflow: hidden; }
   resize: vertical;
 }
 
-.modal-error { padding: 0 1.1rem 1rem; }
+.modal-error {
+  padding: 0 1.1rem 1rem;
+  flex: 0 0 auto;
+}
+
+.date-range-field .date-range {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.date-range-sep {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.date-range input[type="date"] {
+  min-width: 0;
+}
+
+.vacation-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.sprint-title {
+  font-weight: 700;
+}
+
+.sprint-dates {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.capacity-days {
+  margin: 0.35rem 0 0.2rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.capacity-role {
+  white-space: nowrap;
+}
 
 .panel-block {
   margin: 1.25rem 0 1.75rem;

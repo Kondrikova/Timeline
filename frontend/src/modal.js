@@ -4,14 +4,14 @@ import { escapeHtml } from './dom.js';
  * Модальное окно: заголовок + HTML тела + опциональный footer.
  * Возвращает { root, body, close, setError }.
  */
-export function openModal({ title, bodyHtml, onClose }) {
+export function openModal({ title, bodyHtml, onClose, wide = false }) {
   closeModal();
 
   const root = document.createElement('div');
   root.className = 'modal-root';
   root.innerHTML = `
     <div class="modal-backdrop" data-close="1"></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+    <div class="modal${wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
       <header class="modal-header">
         <h2>${escapeHtml(title)}</h2>
         <button type="button" class="modal-close" data-close="1" aria-label="Закрыть">×</button>

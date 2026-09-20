@@ -2,6 +2,8 @@ import { api } from '../api.js';
 import { escapeHtml, readError } from '../dom.js';
 import { openModal } from '../modal.js';
 
+const ROLE_ORDER = ['BE', 'FE', 'QA', 'SA'];
+
 export function renderPlanningTab(root, ctx) {
   const {
     getBoard,
@@ -57,9 +59,9 @@ export function renderPlanningTab(root, ctx) {
         <th>Задача</th>
         ${sprints.map((sprint) => `
           <th>
-            ${escapeHtml(sprint.name || `S${sprint.number}`)}
-            <small>${escapeHtml(sprint.startDate || '')} — ${escapeHtml(sprint.endDate || '')}</small>
-            <div class="capacity">${capacityHtml(sprint.capacity || [])}</div>
+            <div class="sprint-title">${escapeHtml(sprint.name || `Sprint ${sprint.number}`)}</div>
+            <small class="sprint-dates">${escapeHtml(sprint.startDate || '')} — ${escapeHtml(sprint.endDate || '')}</small>
+            <div class="capacity">${capacityHtml(sprint)}</div>
           </th>`).join('')}
       </tr>`;
 
@@ -178,15 +180,70 @@ function emptyRow(sprintCount) {
   return `<tr><td colspan="${sprintCount + 1}" class="cell-empty">Пока нет задач</td></tr>`;
 }
 
-function capacityHtml(cells) {
+function capacityHtml(sprint) {
+  const cells = sortCapacity(sprint.capacity || []);
+  const workingDays = sprint.workingDays
+    ?? inferWorkingDays(sprint.startDate, sprint.endDate);
+  const lines = [
+    `<div class="capacity-days">раб. дней: ${escapeHtml(String(workingDays))}</div>`,
+  ];
   if (!cells.length) {
-    return 'ёмкость появится после событий планирования';
+    lines.push('<div>ёмкость появится после пересчёта плана</div>');
+    return lines.join('');
   }
-  return cells.map((cell) => {
+  for (const cell of cells) {
     const free = cell.freeSp ?? '—';
     const over = cell.overloaded ? ' over' : '';
-    return `<div class="${over}">${escapeHtml(cell.disciplineCode || '?')}: cap ${cell.capacitySp} / alloc ${cell.allocatedSp} / free ${free}</div>`;
-  }).join('');
+    lines.push(
+      `<div class="capacity-role${over}">${escapeHtml(cell.disciplineCode || '?')}: `
+      + `cap ${escapeHtml(fmtSp(cell.capacitySp))} / alloc ${escapeHtml(fmtSp(cell.allocatedSp))}`
+      + ` / free ${escapeHtml(fmtSp(free))}</div>`,
+    );
+  }
+  return lines.join('');
+}
+
+function sortCapacity(cells) {
+  return [...cells].sort((a, b) => {
+    const ai = ROLE_ORDER.indexOf(a.disciplineCode);
+    const bi = ROLE_ORDER.indexOf(b.disciplineCode);
+    const av = ai === -1 ? 99 : ai;
+    const bv = bi === -1 ? 99 : bi;
+    if (av !== bv) {
+      return av - bv;
+    }
+    return String(a.disciplineCode || '').localeCompare(String(b.disciplineCode || ''));
+  });
+}
+
+function fmtSp(value) {
+  if (value == null || value === '') {
+    return '—';
+  }
+  const num = Number(value);
+  if (Number.isNaN(num)) {
+    return String(value);
+  }
+  return Number.isInteger(num) ? String(num) : String(num);
+}
+
+function inferWorkingDays(start, end) {
+  if (!start || !end) {
+    return '—';
+  }
+  const from = new Date(`${start}T00:00:00`);
+  const to = new Date(`${end}T00:00:00`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
+    return '—';
+  }
+  let days = 0;
+  for (let cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) {
+      days += 1;
+    }
+  }
+  return days;
 }
 
 function cellHtml(task, sprintId) {

@@ -81,6 +81,7 @@ public class BoardDocument {
 			String name,
 			LocalDate startDate,
 			LocalDate endDate,
+			int workingDays,
 			List<CapacityCell> capacity) {
 	}
 
